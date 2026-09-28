@@ -1,122 +1,33 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
-
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
     <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+      <div>
+        <h1>asdasdasdasasdasdsadd binugbog na bading</h1>
 
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+        <img src="https://scontent.fcrk1-1.fna.fbcdn.net/v/t1.15752-9/749096279_1593077472393226_2201071785635197604_n.png?stp=dst-png&cstp=mx205x263&ctp=s205x263&_nc_cat=109&ccb=1-7&_nc_sid=9f807c&_nc_eui2=AeFvr4Snlx1wg9QKA2G3Q1IOYSttomD58p1hK22iYPnynV7se0z7hbGtCam4AhIi2Ww0V8s_6UUjPWaHz3l3MbE6&_nc_ohc=KjbKHzG0NS8Q7kNvwFZNlAR&_nc_oc=AdoFo49tUGexax6lLqupoGRsbI6q_yvl86tehyTJnxHokAMc0NnEKVmi05ogelpSEIM&_nc_zt=23&_nc_ht=scontent.fcrk1-1.fna&_nc_ss=7b2a8&oh=03_Q7cD6gHcARwv_g4aLeWuFjmoIQ00KsfbdMB3ZghyB00hUipcaA&oe=6AE1CF9D" />
+      </div>
     </>
-  )
+  );
 }
 
-export default App
+export default App;
