@@ -1,1 +1,29 @@
 @import "tailwindcss";
+
+main [class*="text-[6px]"],
+main [class*="text-[7px]"],
+main [class*="text-[8px]"],
+main [class*="text-[9px]"] {
+  font-size: 12px !important;
+}
+
+main [class*="text-[10px]"],
+main [class*="text-[11px]"],
+main [class*="text-[12px]"],
+main [class*="text-[13px]"] {
+  font-size: 14px !important;
+}
+
+main > aside nav a {
+  font-size: 14px !important;
+}
+
+main > section > nav a {
+  font-size: 12px !important;
+}
+
+@media (max-width: 850px) {
+  main > aside nav a {
+    font-size: 0 !important;
+  }
+}

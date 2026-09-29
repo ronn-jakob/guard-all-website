@@ -1,6 +1,5 @@
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
-import logo from "../images/Guard All Logo Blue.png";
 
 const metrics = [
   [
@@ -88,20 +87,15 @@ const label =
 
 function Dashboard() {
   return (
-    <main className="flex h-screen overflow-hidden bg-[#1f2022] font-sans text-[#063b7c] max-[1024px]:block max-[1024px]:[&>aside]:hidden">
+    <main className="flex h-screen overflow-hidden bg-[#1f2022] font-sans text-[#063b7c] max-[1024px]:block">
       <Sidebar />
-
       <section className="h-screen min-w-0 flex-1 overflow-y-auto bg-[#edf7ff]">
         <TopBar />
-        <header className="hidden h-[52px] items-center justify-between border-b border-[#d7e2ec] bg-white px-4 max-[1024px]:flex"><img className="h-7 w-[95px] object-contain" src={logo} alt="Guard-All" /><div className="text-right text-[7px] text-[#7c8186]"><strong className="block text-[8px] text-[#202a35]">Makati - Metro Manila</strong><span>Mon, 15 Sep 2026 · 9:58 AM</span></div><span className="grid h-7 w-7 place-items-center rounded-full bg-[#ff4825] text-[8px] font-bold text-white">RJ</span></header>
         <div className="px-8 pb-6 pt-9 max-[1024px]:px-6 max-[1024px]:pb-20 max-[1024px]:pt-5 max-[620px]:px-3">
           <h1 className="m-0 mb-6 text-[30px] font-bold tracking-[-.5px] max-[1024px]:text-[24px] max-[620px]:mb-4 max-[620px]:text-[19px]">
             Good morning, R. Jakob
           </h1>
-          <section
-            className="grid grid-cols-4 gap-[18px] max-[1024px]:grid-cols-2 max-[620px]:grid-cols-1 max-[620px]:gap-1"
-            
-          >
+          <section className="grid grid-cols-4 gap-[18px] max-[1024px]:grid-cols-2 max-[620px]:grid-cols-1 max-[620px]:gap-1">
             {metrics.map(([icon, title, value, note, tone, alert]) => (
               <article
                 className={`relative min-h-[156px] rounded-[10px] border bg-white p-[22px] shadow-[0_3px_7px_rgb(31_59_82_/_13%)] max-[1024px]:min-h-[105px] max-[1024px]:p-4 max-[620px]:min-h-[64px] max-[620px]:rounded-[6px] max-[620px]:p-3 ${alert ? "border-[#ff725f] shadow-[0_3px_8px_rgb(255_114_95_/_22%)]" : "border-[#e0e6eb]"}`}
@@ -110,12 +104,16 @@ function Dashboard() {
                 <div
                   className={`grid h-9 w-9 place-items-center rounded-[6px] text-[15px] max-[620px]:hidden ${tone}`}
                 >
-                  <span className="material-symbols-outlined text-[21px]">{icon}</span>
+                  <span className="material-symbols-outlined text-[21px]">
+                    {icon}
+                  </span>
                 </div>
                 <span
                   className={`absolute right-[20px] top-[22px] text-[17px] max-[620px]:hidden ${alert ? "text-[#ff725f]" : "text-[#16bc56]"}`}
                 >
-                  <span className="material-symbols-outlined text-[22px]">north_east</span>
+                  <span className="material-symbols-outlined text-[22px]">
+                    north_east
+                  </span>
                 </span>
                 <p className="mb-0 mt-5 text-[11px] font-bold uppercase tracking-[.06em] text-[#858b90] max-[1024px]:mt-3 max-[620px]:mt-0 max-[620px]:text-[7px]">
                   {title}
@@ -123,7 +121,9 @@ function Dashboard() {
                 <strong className="mt-px block text-[29px] font-extrabold leading-tight max-[1024px]:text-[23px] max-[620px]:text-[15px]">
                   {value}
                 </strong>
-                <small className="text-[10px] text-[#8e959b] max-[620px]:hidden">{note}</small>
+                <small className="text-[10px] text-[#8e959b] max-[620px]:hidden">
+                  {note}
+                </small>
               </article>
             ))}
           </section>
@@ -141,14 +141,13 @@ function Dashboard() {
                   className="text-[11px] font-bold text-[#063b7c] no-underline max-[1024px]:text-[7px]"
                   href="#schedule"
                 >
-                  Open schedule <span className="material-symbols-outlined ml-1 align-middle text-[20px]">chevron_right</span>
+                  Open schedule{" "}
+                  <span className="material-symbols-outlined ml-1 align-middle text-[20px]">
+                    chevron_right
+                  </span>
                 </a>
               </header>
-              <div
-                className="border-t border-[#e0e6eb]"
-                role="table"
-               
-              >
+              <div className="border-t border-[#e0e6eb]" role="table">
                 <div
                   className={`${row} min-h-[42px] border-b border-[#e0e0e0] text-[9px] font-bold uppercase tracking-[.04em] text-[#77818a] max-[620px]:hidden`}
                   role="row"
@@ -177,10 +176,13 @@ function Dashboard() {
                     <div className="min-w-0">
                       <strong className="block truncate">{job[3]}</strong>
                       <small className="mt-1 block text-[9px] text-[#8d969e]">
-                        <span className="material-symbols-outlined align-middle text-[10px]">location_on</span> {job[4]}
+                        <span className="material-symbols-outlined align-middle text-[10px]">
+                          location_on
+                        </span>{" "}
+                        {job[4]}
                       </small>
                     </div>
-                      <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2">
                       <span
                         className={`grid h-7 w-7 place-items-center rounded-full text-[9px] font-bold text-white ${index === 1 ? "bg-[#17549e]" : "bg-[#e24f52]"}`}
                       >
@@ -196,7 +198,9 @@ function Dashboard() {
                     >
                       ◎ {job[8]}
                     </span>
-                    <span className="material-symbols-outlined text-[20px] text-[#15519c]">chevron_right</span>
+                    <span className="material-symbols-outlined text-[20px] text-[#15519c]">
+                      chevron_right
+                    </span>
                   </div>
                 ))}
               </div>
@@ -205,13 +209,17 @@ function Dashboard() {
             <aside className="min-h-[290px] overflow-hidden rounded-[11px] border border-[#dfe6ec] bg-[#f8fbff] p-5 shadow-[0_3px_7px_rgb(31_59_82_/_10%)] max-[1024px]:min-h-[360px] max-[1024px]:bg-[#063b7c] max-[1024px]:p-3 max-[620px]:min-h-0 max-[620px]:rounded-[7px]">
               <header className="flex justify-between">
                 <div>
-                  <p className={`${label} max-[1024px]:text-[#dbeafa]`}>Needs attention</p>
+                  <p className={`${label} max-[1024px]:text-[#dbeafa]`}>
+                    Needs attention
+                  </p>
                   <h2 className="m-0 mt-1 text-[21px] font-bold max-[1024px]:text-white max-[1024px]:text-[13px]">
                     Operation pulse
                   </h2>
                 </div>
                 <span className="grid h-[26px] w-[26px] place-items-center rounded-[6px] bg-white text-lg max-[1024px]:hidden">
-                  <span className="material-symbols-outlined text-[18px]">shield</span>
+                  <span className="material-symbols-outlined text-[18px]">
+                    shield
+                  </span>
                 </span>
               </header>
               <div className="mt-[22px] max-[1024px]:mt-3">
@@ -241,7 +249,9 @@ function Dashboard() {
                     key={title}
                   >
                     <span className={`w-5 text-center text-[13px] ${color}`}>
-                      <span className="material-symbols-outlined text-[18px]">{icon}</span>
+                      <span className="material-symbols-outlined text-[18px]">
+                        {icon}
+                      </span>
                     </span>
                     <strong className="flex-1 text-[10px] max-[1024px]:text-[8px]">
                       {title}
@@ -249,7 +259,9 @@ function Dashboard() {
                         {note}
                       </small>
                     </strong>
-                    <b className="material-symbols-outlined text-[17px] font-normal text-[#a6adb3]">chevron_right</b>
+                    <b className="material-symbols-outlined text-[17px] font-normal text-[#a6adb3]">
+                      chevron_right
+                    </b>
                   </a>
                 ))}
               </div>
@@ -260,7 +272,6 @@ function Dashboard() {
             Guard-All Electronic Security Systems, Inc.
           </footer>
         </div>
-        <nav className="hidden max-[1024px]:fixed max-[1024px]:bottom-0 max-[1024px]:left-0 max-[1024px]:right-0 max-[1024px]:z-10 max-[1024px]:grid max-[1024px]:grid-cols-5 max-[1024px]:border-t max-[1024px]:border-[#d5dfe8] max-[1024px]:bg-white max-[1024px]:py-2 max-[620px]:py-1" aria-label="Mobile navigation"><a className="flex flex-col items-center text-[7px] font-bold text-[#174f9a] no-underline" href="/dashboard"><span className="material-symbols-outlined text-[17px]">dashboard</span>Dash</a><a className="flex flex-col items-center text-[7px] text-[#8a9299] no-underline" href="/scheduling"><span className="material-symbols-outlined text-[17px]">calendar_month</span>Schedule</a><a className="flex flex-col items-center text-[7px] text-[#8a9299] no-underline" href="/inventory"><span className="material-symbols-outlined text-[17px]">inventory_2</span>Inventory</a><a className="flex flex-col items-center text-[7px] text-[#8a9299] no-underline" href="/billing"><span className="material-symbols-outlined text-[17px]">sell</span>Billing</a><a className="flex flex-col items-center text-[7px] text-[#8a9299] no-underline" href="/reports"><span className="material-symbols-outlined text-[17px]">assignment</span>Reports</a></nav>
       </section>
     </main>
   );
