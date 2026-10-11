@@ -3,6 +3,7 @@ import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 
 const roles = ["Administrator", "Operations Manager", "Technician", "Billing Staff"];
+const branches = ["Makati", "Cebu"];
 
 function Account() {
   const [accounts, setAccounts] = useState([]);
@@ -38,9 +39,12 @@ function Account() {
     event.preventDefault();
     const form = event.currentTarget;
     const formData = new FormData(form);
-    const name = formData.get("name").trim();
+    const firstName = formData.get("firstName")?.trim() || "";
+    const lastName = formData.get("lastName")?.trim() || "";
+    const name = [firstName, lastName].filter(Boolean).join(" ");
     const email = formData.get("email").trim().toLowerCase();
     const role = formData.get("role");
+    const branch = formData.get("branch");
 
     if (accounts.some((account) => account.email === email)) {
       setFormError("An account with this email address already exists.");
@@ -54,6 +58,7 @@ function Account() {
         name,
         email,
         role,
+        branch,
         status: "Active",
         createdAt: new Date().toLocaleDateString("en-US", {
           month: "short",
@@ -152,21 +157,40 @@ function Account() {
                 className="flex flex-col gap-4 p-6 max-[620px]:gap-3 max-[620px]:p-4"
                 onSubmit={handleCreateAccount}
               >
-                <div className="flex flex-col gap-1.5">
-                  <label
-                    className="text-[12px] font-semibold text-[#45515c]"
-                    htmlFor="account-name"
-                  >
-                    Full name
-                  </label>
-                  <input
-                    className="h-11 rounded-[6px] border border-[#d6dee6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
-                    id="account-name"
-                    name="name"
-                    placeholder="e.g. Jordan Lee"
-                    autoComplete="name"
-                    required
-                  />
+                <div className="grid grid-cols-2 gap-3 max-[440px]:grid-cols-1">
+                  <div className="flex flex-col gap-1.5">
+                    <label
+                      className="text-[12px] font-semibold text-[#45515c]"
+                      htmlFor="account-first-name"
+                    >
+                      First name
+                    </label>
+                    <input
+                      className="h-11 rounded-[6px] border border-[#d6dee6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
+                      id="account-first-name"
+                      name="firstName"
+                      placeholder="e.g. Jordan"
+                      autoComplete="given-name"
+                      required
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label
+                      className="text-[12px] font-semibold text-[#45515c]"
+                      htmlFor="account-last-name"
+                    >
+                      Last name
+                    </label>
+                    <input
+                      className="h-11 rounded-[6px] border border-[#d6dee6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
+                      id="account-last-name"
+                      name="lastName"
+                      placeholder="e.g. Lee"
+                      autoComplete="family-name"
+                      required
+                    />
+                  </div>
                 </div>
 
                 <div className="flex flex-col gap-1.5">
@@ -203,6 +227,28 @@ function Account() {
                     {roles.map((role) => (
                       <option key={role} value={role}>
                         {role}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    className="text-[12px] font-semibold text-[#45515c]"
+                    htmlFor="account-branch"
+                  >
+                    Branch Deployed
+                  </label>
+                  <select
+                    className="h-11 rounded-[6px] border border-[#d6dee6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
+                    id="account-branch"
+                    name="branch"
+                    defaultValue="Makati"
+                    required
+                  >
+                    {branches.map((branch) => (
+                      <option key={branch} value={branch}>
+                        {branch}
                       </option>
                     ))}
                   </select>

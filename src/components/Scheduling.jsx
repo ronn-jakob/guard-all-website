@@ -2,6 +2,13 @@ import { useState } from "react";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 
+const technicianOptions = [
+  "Jordan Lee",
+  "Maya Santos",
+  "Donnie Ramos",
+  "Lanie Santos",
+];
+
 const schedule = [
   [
     "09:00",
@@ -63,16 +70,6 @@ const scheduledJobDates = {
   "WO-88434": new Date(2026, 8, 2),
 };
 
-function getIsoWeek(date) {
-  const weekDate = new Date(
-    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
-  );
-  const dayOfWeek = weekDate.getUTCDay() || 7;
-  weekDate.setUTCDate(weekDate.getUTCDate() + 4 - dayOfWeek);
-  const yearStart = new Date(Date.UTC(weekDate.getUTCFullYear(), 0, 1));
-  return Math.ceil(((weekDate - yearStart) / 86400000 + 1) / 7);
-}
-
 function formatDateRange(startDate, endDate) {
   const startMonth = startDate.toLocaleString("en-US", { month: "long" });
   const endMonth = endDate.toLocaleString("en-US", { month: "long" });
@@ -87,25 +84,83 @@ function formatDateRange(startDate, endDate) {
   return `${startDate.getDate()} ${startMonth} - ${endDate.getDate()} ${endMonth} ${endDate.getFullYear()}`;
 }
 
+function formatMonthLabel(date) {
+  return date.toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function getDateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function formatSelectedDate(date) {
+  return date.toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 function Scheduling() {
   const [selectedOrder, setSelectedOrder] = useState("WO-88431");
   const [isCreateJobOpen, setIsCreateJobOpen] = useState(false);
   const [priority, setPriority] = useState("Normal");
+  const [clientType, setClientType] = useState("Individual");
+  const [technicians, setTechnicians] = useState([""]);
 
   // State to manage active view mode ('list' | 'calendar')
   const [viewMode, setViewMode] = useState("list");
   const [isShortageOptionsOpen, setIsShortageOptionsOpen] = useState(false);
   const [shortageResolution, setShortageResolution] = useState(null);
   const [rangeStart, setRangeStart] = useState(new Date(2026, 8, 1));
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(
+    new Date(2026, 8, 1),
+  );
 
   const rangeEnd = new Date(
     rangeStart.getFullYear(),
     rangeStart.getMonth(),
-    rangeStart.getDate() + 14,
+    rangeStart.getDate() + 9,
   );
   const scheduledJobsInRange = schedule.filter((job) => {
     const jobDate = scheduledJobDates[job[3]];
     return jobDate >= rangeStart && jobDate <= rangeEnd;
+  });
+  const calendarMonthStart = new Date(
+    rangeStart.getFullYear(),
+    rangeStart.getMonth(),
+    1,
+  );
+  const calendarDaysInMonth = new Date(
+    calendarMonthStart.getFullYear(),
+    calendarMonthStart.getMonth() + 1,
+    0,
+  ).getDate();
+  const calendarLeadingDays = calendarMonthStart.getDay();
+  const calendarDays = Array.from(
+    { length: calendarLeadingDays + calendarDaysInMonth },
+    (_, index) =>
+      index < calendarLeadingDays
+        ? null
+        : new Date(
+            calendarMonthStart.getFullYear(),
+            calendarMonthStart.getMonth(),
+            index - calendarLeadingDays + 1,
+          ),
+  );
+  const selectedDayJobs = schedule.filter(
+    (job) =>
+      getDateKey(scheduledJobDates[job[3]]) === getDateKey(selectedCalendarDate),
+  );
+  const scheduledJobsInCalendarMonth = schedule.filter((job) => {
+    const jobDate = scheduledJobDates[job[3]];
+    return (
+      jobDate.getFullYear() === calendarMonthStart.getFullYear() &&
+      jobDate.getMonth() === calendarMonthStart.getMonth()
+    );
   });
 
   function changeDateRange(dayOffset) {
@@ -117,6 +172,26 @@ function Scheduling() {
           currentStart.getDate() + dayOffset,
         ),
     );
+  }
+
+  function changeCalendarMonth(monthOffset) {
+    const nextMonth = new Date(
+      rangeStart.getFullYear(),
+      rangeStart.getMonth() + monthOffset,
+      1,
+    );
+    setRangeStart(nextMonth);
+    setSelectedCalendarDate(nextMonth);
+  }
+
+  function handleCalendarDateClick(date) {
+    setSelectedCalendarDate(date);
+    const firstJobOnDate = schedule.find(
+      (job) => getDateKey(scheduledJobDates[job[3]]) === getDateKey(date),
+    );
+    if (firstJobOnDate) {
+      setSelectedOrder(firstJobOnDate[3]);
+    }
   }
 
   const selectedJob =
@@ -165,7 +240,11 @@ function Scheduling() {
                 <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => changeDateRange(-15)}
+                    onClick={() =>
+                      viewMode === "calendar"
+                        ? changeCalendarMonth(-1)
+                        : changeDateRange(-10)
+                    }
                     aria-label="Previous date range"
                     className="grid h-9 w-9 place-items-center rounded-[6px] border border-[#e5e9ed] bg-white text-[#89939b] max-[620px]:hidden"
                   >
@@ -175,16 +254,23 @@ function Scheduling() {
                   </button>
                   <div>
                     <strong className="text-[15px] max-[1024px]:text-[12px] max-[620px]:text-[11px]">
-                      {formatDateRange(rangeStart, rangeEnd)}
+                      {viewMode === "calendar"
+                        ? formatMonthLabel(calendarMonthStart)
+                        : formatDateRange(rangeStart, rangeEnd)}
                     </strong>
                     <small className="block text-[10px] text-[#8f989f] max-[1024px]:text-[8px]">
-                      Week {getIsoWeek(rangeStart)} ·{" "}
-                      {scheduledJobsInRange.length} jobs scheduled
+                      {viewMode === "calendar"
+                        ? `${scheduledJobsInCalendarMonth.length} jobs scheduled this month`
+                        : `10-day period · ${scheduledJobsInRange.length} jobs scheduled`}
                     </small>
                   </div>
                   <button
                     type="button"
-                    onClick={() => changeDateRange(15)}
+                    onClick={() =>
+                      viewMode === "calendar"
+                        ? changeCalendarMonth(1)
+                        : changeDateRange(10)
+                    }
                     aria-label="Next date range"
                     className="grid h-9 w-9 place-items-center rounded-[6px] border border-[#e5e9ed] bg-white text-[#89939b] max-[620px]:hidden"
                   >
@@ -303,7 +389,6 @@ function Scheduling() {
                     )}
                   </div>
                 ) : (
-                  /* Mobile Responsive Calendar Grid Component */
                   <div className="p-3 max-[620px]:p-1.5">
                     <div className="grid grid-cols-7 gap-1 rounded-lg border border-[#e1e6eb] bg-[#e1e6eb] text-center text-[11px] font-semibold max-[620px]:text-[9px]">
                       {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
@@ -319,26 +404,87 @@ function Scheduling() {
                           </div>
                         ),
                       )}
-                      {Array.from({ length: 30 }).map((_, i) => {
-                        const dayNumber = i + 1;
-                        const hasJobs = dayNumber === 1 || dayNumber === 2;
+                      {calendarDays.map((date, index) => {
+                        if (!date) {
+                          return <div key={`empty-${index}`} className="bg-[#f8fbff]" />;
+                        }
+
+                        const jobsOnDate = schedule.filter(
+                          (job) =>
+                            getDateKey(scheduledJobDates[job[3]]) ===
+                            getDateKey(date),
+                        );
+                        const isSelected =
+                          getDateKey(date) === getDateKey(selectedCalendarDate);
+
                         return (
-                          <div
-                            key={i}
-                            className="flex h-[56px] flex-col justify-between bg-white p-1 text-left transition-colors hover:bg-[#f0f5fb] max-[1024px]:h-[50px] max-[620px]:h-[44px] max-[620px]:p-0.5"
+                          <button
+                            key={getDateKey(date)}
+                            type="button"
+                            onClick={() => handleCalendarDateClick(date)}
+                            aria-label={`${formatSelectedDate(date)}${jobsOnDate.length ? `, ${jobsOnDate.length} jobs` : ""}`}
+                            className={`flex h-[56px] flex-col justify-between p-1 text-left transition-colors max-[1024px]:h-[50px] max-[620px]:h-[44px] max-[620px]:p-0.5 ${
+                              isSelected
+                                ? "bg-[#e5effc] ring-2 ring-inset ring-[#1250a0]"
+                                : "bg-white hover:bg-[#f0f5fb]"
+                            }`}
                           >
-                            <span className="text-[10px] font-bold text-[#818b94] max-[620px]:text-[8px]">
-                              {dayNumber}
+                            <span
+                              className={`text-[10px] font-bold max-[620px]:text-[8px] ${
+                                isSelected ? "text-[#1250a0]" : "text-[#818b94]"
+                              }`}
+                            >
+                              {date.getDate()}
                             </span>
-                            {hasJobs && (
-                              <div className="mt-auto truncate rounded bg-[#1250a0]/10 px-1 py-0.5 text-[8px] font-bold text-[#1250a0] max-[620px]:text-[7px] max-[620px]:px-0.5">
-                                {dayNumber === 1 ? "3 Jobs" : "2 Jobs"}
-                              </div>
+                            {jobsOnDate.length > 0 && (
+                              <span className="mt-auto truncate rounded bg-[#1250a0]/10 px-1 py-0.5 text-[8px] font-bold text-[#1250a0] max-[620px]:text-[7px] max-[620px]:px-0.5">
+                                {jobsOnDate.length} {jobsOnDate.length === 1 ? "Job" : "Jobs"}
+                              </span>
                             )}
-                          </div>
+                          </button>
                         );
                       })}
                     </div>
+
+                    <section className="mt-3 rounded-[8px] border border-[#e1e6eb] bg-[#fbfdff] p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="m-0 text-[12px] font-bold text-[#263747]">
+                          Jobs on {formatSelectedDate(selectedCalendarDate)}
+                        </h3>
+                        <span className="text-[10px] font-semibold text-[#7f8992]">
+                          {selectedDayJobs.length} {selectedDayJobs.length === 1 ? "job" : "jobs"}
+                        </span>
+                      </div>
+                      {selectedDayJobs.length > 0 ? (
+                        <div className="mt-2 divide-y divide-[#e5e8eb]">
+                          {selectedDayJobs.map(([time, , client, order, service]) => (
+                            <button
+                              key={order}
+                              type="button"
+                              onClick={() => setSelectedOrder(order)}
+                              className={`flex w-full items-center gap-3 py-2 text-left ${
+                                selectedOrder === order ? "text-[#1250a0]" : "text-[#45515c]"
+                              }`}
+                            >
+                              <strong className="w-11 flex-none text-[11px]">{time}</strong>
+                              <span className="min-w-0 flex-1">
+                                <strong className="block truncate text-[11px]">{client}</strong>
+                                <span className="block truncate text-[10px] text-[#89939b]">
+                                  {service} · {order}
+                                </span>
+                              </span>
+                              <span className="material-symbols-outlined text-[17px] text-[#a6afb8]">
+                                chevron_right
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="m-0 mt-2 text-[11px] text-[#89939b]">
+                          No scheduled jobs for this day.
+                        </p>
+                      )}
+                    </section>
                   </div>
                 )}
               </div>
@@ -558,18 +704,90 @@ function Scheduling() {
                 setIsCreateJobOpen(false);
               }}
             >
+              <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
+                <label className="text-[14px] font-medium text-[#a9bfd9]">
+                  First name <span className="text-[#ff6557]">*</span>
+                  <input
+                    required
+                    name="firstName"
+                    placeholder="First name"
+                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                  />
+                </label>
+                <label className="text-[14px] font-medium text-[#a9bfd9]">
+                  Last name <span className="text-[#ff6557]">*</span>
+                  <input
+                    required
+                    name="lastName"
+                    placeholder="Last name"
+                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                  />
+                </label>
+              </div>
+
+              <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
+                <label className="text-[14px] font-medium text-[#a9bfd9]">
+                  Client Type <span className="text-[#ff6557]">*</span>
+                  <select
+                    required
+                    name="clientType"
+                    value={clientType}
+                    onChange={(event) => setClientType(event.target.value)}
+                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
+                  >
+                    <option>Individual</option>
+                    <option>Company</option>
+                  </select>
+                </label>
+                <label className="text-[14px] font-medium text-[#a9bfd9]">
+                  Company Name
+                  <input
+                    name="companyName"
+                    disabled={clientType !== "Company"}
+                    required={clientType === "Company"}
+                    placeholder="Company name"
+                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8] disabled:cursor-not-allowed disabled:opacity-45"
+                  />
+                </label>
+              </div>
+              
               <label className="mb-4 block text-[14px] font-medium text-[#a9bfd9]">
-                Client / Site <span className="text-[#ff6557]">*</span>
+                Address <span className="text-[#ff6557]">*</span>
                 <input
                   required
                   autoFocus
-                  placeholder="Search client or site name..."
+                  name="address"
+                  placeholder="Site or client address"
                   className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
                 />
               </label>
 
               <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
                 <label className="text-[14px] font-medium text-[#a9bfd9]">
+                  Contact email <span className="text-[#ff6557]">*</span>
+                  <input
+                    required
+                    name="contactEmail"
+                    type="email"
+                    placeholder="name@example.com"
+                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                  />
+                </label>
+                <label className="text-[14px] font-medium text-[#a9bfd9]">
+                  Phone number <span className="text-[#ff6557]">*</span>
+                  <input
+                    required
+                    name="phoneNumber"
+                    type="tel"
+                    placeholder="09XX XXX XXXX"
+                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                  />
+                </label>
+              </div>
+
+
+              <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
+                <label className="col-span-2 text-[14px] font-medium text-[#a9bfd9] max-[620px]:col-span-1">
                   Service type <span className="text-[#ff6557]">*</span>
                   <select
                     defaultValue="Service call"
@@ -581,43 +799,17 @@ function Scheduling() {
                     <option>Inspection</option>
                   </select>
                 </label>
-                <label className="text-[14px] font-medium text-[#a9bfd9]">
-                  Branch <span className="text-[#ff6557]">*</span>
-                  <select
-                    defaultValue="Makati - Metro Manila"
-                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
-                  >
-                    <option>Makati - Metro Manila</option>
-                    <option>Cebu - Mandaue</option>
-                  </select>
-                </label>
               </div>
-
-              <fieldset className="mb-4 border-0 p-0">
-                <legend className="mb-1.5 text-[14px] font-medium text-[#a9bfd9]">
-                  Priority
-                </legend>
-                <div className="grid grid-cols-4 gap-2 max-[420px]:grid-cols-2">
-                  {["Low", "Normal", "High", "Urgent"].map((level) => (
-                    <button
-                      key={level}
-                      type="button"
-                      onClick={() => setPriority(level)}
-                      className={`h-12 rounded-[10px] border text-[15px] transition-colors ${priority === level ? "border-[#4d88e8] bg-[#4d88e8] text-white" : "border-[#293f5d] bg-[#1d3351] text-[#e5edf8] hover:border-[#4d88e8]"}`}
-                    >
-                      {level}
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
-
+              
               <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:gap-3">
                 <label className="text-[14px] font-medium text-[#a9bfd9]">
                   Date <span className="text-[#ff6557]">*</span>
                   <input
                     required
                     type="date"
-                    defaultValue="2026-09-30"
+                    name="date"
+                    value={getDateKey(selectedCalendarDate)}
+                    readOnly
                     className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
                   />
                 </label>
@@ -632,19 +824,61 @@ function Scheduling() {
                 </label>
               </div>
 
-              <label className="block text-[14px] font-medium text-[#a9bfd9]">
-                Assign technician <span className="text-[#ff6557]">*</span>
-                <select
-                  required
-                  defaultValue="Jordan Lee"
-                  className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
-                >
-                  <option>Jordan Lee</option>
-                  <option>Maya Santos</option>
-                  <option>Donnie Ramos</option>
-                  <option>Lanie Santos</option>
-                </select>
-              </label>
+              <fieldset className="border-0 p-0">
+                <div className="flex items-center justify-between gap-3">
+                  <legend className="text-[14px] font-medium text-[#a9bfd9]">
+                    Assign technicians <span className="text-[12px] text-[#7188a4]">(optional)</span>
+                  </legend>
+                  <button
+                    type="button"
+                    onClick={() => setTechnicians((current) => [...current, ""])}
+                    className="rounded-[8px] border border-[#4d88e8] px-3 py-2 text-[12px] font-semibold text-[#9fc4ff] hover:bg-[#1d3351]"
+                  >
+                    + Add technician
+                  </button>
+                </div>
+                <div className="mt-2 grid gap-2">
+                  {technicians.map((technician, index) => (
+                    <div className="flex items-center gap-2" key={`technician-${index}`}>
+                      <select
+                        name="technicians"
+                        value={technician}
+                        onChange={(event) =>
+                          setTechnicians((current) =>
+                            current.map((value, currentIndex) =>
+                              currentIndex === index ? event.target.value : value,
+                            ),
+                          )
+                        }
+                        className="h-12 min-w-0 flex-1 rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
+                      >
+                        <option value="">Select a technician</option>
+                        {technicianOptions.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      {technicians.length > 1 && (
+                        <button
+                          type="button"
+                          aria-label={`Remove technician ${index + 1}`}
+                          onClick={() =>
+                            setTechnicians((current) =>
+                              current.filter((_, currentIndex) => currentIndex !== index),
+                            )
+                          }
+                          className="grid h-10 w-10 flex-none place-items-center rounded-[8px] text-[#91a8c7] hover:bg-[#1d3351] hover:text-white"
+                        >
+                          <span className="material-symbols-outlined text-[20px]">
+                            delete
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </fieldset>
               <p className="mb-5 mt-2 flex items-center gap-2 text-[14px] text-[#27a567]">
                 <span className="h-2.5 w-2.5 rounded-full bg-[#27a567]" />
                 No conflicts on selected date and time

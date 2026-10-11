@@ -81,10 +81,16 @@ const metricCards = [
 const branchOptions = ["All branches", "Makati", "Cebu"];
 
 function Inventory() {
+  const [inventoryRecords, setInventoryRecords] = useState(inventoryItems);
   const [isCreateRequisition, setIsCreateRequisition] = useState(false);
+  const [isAddNewItem, setIsAddNewItem] = useState(false);
+  const [selectedItemCode, setSelectedItemCode] = useState(null);
+  const [stockAdjustment, setStockAdjustment] = useState("");
   const [isLedgerMaximized, setIsLedgerMaximized] = useState(false);
   const [priority, setPriority] = useState("Normal");
   const [status, setStatus] = useState("In stock");
+  const [newItemQuantity, setNewItemQuantity] = useState("");
+  const [newItemUnitPrice, setNewItemUnitPrice] = useState("");
 
   // Branch dropdown & filtering state
   const [selectedBranch, setSelectedBranch] = useState("All branches");
@@ -106,12 +112,45 @@ function Inventory() {
   }, []);
 
   // Filter inventory items based on selected branch
-  const filteredInventoryItems = inventoryItems.filter((item) => {
+  const filteredInventoryItems = inventoryRecords.filter((item) => {
     const itemBranch = item[5]; // Index 5 holds branch name
     if (selectedBranch === "All branches") return true;
     return itemBranch.toLowerCase() === selectedBranch.toLowerCase();
   });
   const hasInventoryItems = filteredInventoryItems.length > 0;
+  const newItemTotalCost =
+    (Number(newItemQuantity) || 0) * (Number(newItemUnitPrice) || 0);
+  const selectedInventoryItem = inventoryRecords.find(
+    (item) => item[2] === selectedItemCode,
+  );
+
+  function handleStockAdjustment(direction) {
+    const quantity = Number(stockAdjustment);
+    if (!selectedItemCode || !Number.isInteger(quantity) || quantity <= 0) {
+      return;
+    }
+
+    setInventoryRecords((currentRecords) =>
+      currentRecords.map((item) => {
+        if (item[2] !== selectedItemCode) return item;
+
+        const currentQuantity = Number(item[3]) || 0;
+        const nextQuantity =
+          direction === "add"
+            ? currentQuantity + quantity
+            : Math.max(0, currentQuantity - quantity);
+        const unitPrice = Number(String(item[7]).replace(/[^0-9.]/g, ""));
+        const nextStatus = nextQuantity <= Number(item[4]) ? "Low stock" : "In stock";
+        const updatedItem = [...item];
+        updatedItem[3] = String(nextQuantity);
+        updatedItem[8] = `₱${(unitPrice * nextQuantity).toLocaleString("en-PH")}`;
+        updatedItem[10] = nextStatus;
+        updatedItem[11] = nextStatus === "Low stock";
+        return updatedItem;
+      }),
+    );
+    setStockAdjustment("");
+  }
 
   return (
     <main className="flex h-screen overflow-hidden bg-[#1f2022] font-sans text-[#063b7c] max-[1024px]:block">
@@ -131,13 +170,22 @@ function Inventory() {
                 Know what can leave the branch before the truck does.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setIsCreateRequisition(true)}
-              className="rounded-[6px] bg-[#1250a0] px-5 py-3 text-[12px] font-bold text-white shadow-[0_2px_4px_rgb(18_80_160_/_25%)] max-[1024px]:px-4 max-[1024px]:py-2 max-[620px]:text-[9px]"
-            >
-              + Create Requisition
-            </button>
+            <div className="flex items-center gap-3 max-[620px]:gap-2">
+              <button
+                type="button"
+                onClick={() => setIsAddNewItem(true)}
+                className="rounded-[6px] border border-[#1250a0] bg-white px-5 py-3 text-[12px] font-bold text-[#1250a0] shadow-[0_2px_4px_rgb(18_80_160_/_12%)] hover:bg-[#f3f8ff] max-[1024px]:px-4 max-[1024px]:py-2 max-[620px]:text-[9px]"
+              >
+                + Add New Item
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsCreateRequisition(true)}
+                className="rounded-[6px] bg-[#1250a0] px-5 py-3 text-[12px] font-bold text-white shadow-[0_2px_4px_rgb(18_80_160_/_25%)] max-[1024px]:px-4 max-[1024px]:py-2 max-[620px]:text-[9px]"
+              >
+                + Create Requisition
+              </button>
+            </div>
           </div>
 
           <section
@@ -339,12 +387,16 @@ function Inventory() {
                       </span>
                       {statusName}
                     </span>
-                    <a
-                      href="#action"
-                      className="text-right text-[10px] font-bold text-[#7573bd] max-[620px]:hidden"
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedItemCode(code);
+                        setStockAdjustment("");
+                      }}
+                      className="text-right text-[10px] font-bold text-[#7573bd] hover:text-[#1250a0] max-[620px]:col-start-2 max-[620px]:row-start-3"
                     >
-                      {alert ? "Requisition" : "View"}
-                    </a>
+                      View
+                    </button>
                   </div>
                 )
               )
@@ -355,6 +407,323 @@ function Inventory() {
             Guard-All Electronic Security Systems, Inc.
           </footer>
         </div>
+
+        {selectedInventoryItem && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[#071426]/75 p-4 backdrop-blur-[2px] max-[620px]:items-end max-[620px]:p-0"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setSelectedItemCode(null);
+            }}
+          >
+            <section
+              role="dialog"
+              aria-labelledby="inventory-item-details-title"
+              className="w-full max-w-[620px] rounded-[17px] border border-[#263c5a] bg-[#172a44] text-[#e5edf8] shadow-[0_24px_80px_rgb(0_0_0_/_45%)]"
+            >
+              <header className="flex items-start justify-between border-b border-[#293d58] px-7 py-5 max-[620px]:px-5 max-[620px]:py-4">
+                <div>
+                  <p className="m-0 text-[12px] font-semibold uppercase tracking-[.1em] text-[#91a8c7]">
+                    Stock Ledger / Item Details
+                  </p>
+                  <h2
+                    id="inventory-item-details-title"
+                    className="m-0 mt-1 text-[25px] font-bold text-white max-[620px]:text-[21px]"
+                  >
+                    {selectedInventoryItem[1]}
+                  </h2>
+                  <p className="m-0 mt-1 text-[13px] text-[#99afc9]">
+                    {selectedInventoryItem[2]} · {selectedInventoryItem[9]}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedItemCode(null)}
+                  className="grid h-8 w-8 place-items-center text-[27px] leading-none text-[#91a8c7] hover:text-white"
+                >
+                  ×
+                </button>
+              </header>
+
+              <div className="px-7 py-5 max-[620px]:px-5">
+                <div className="grid grid-cols-2 gap-3 text-[13px] max-[420px]:grid-cols-1">
+                  <div className="rounded-[8px] bg-[#1d3351] p-3">
+                    <span className="block text-[11px] text-[#91a8c7]">Branch</span>
+                    <strong className="mt-1 block">{selectedInventoryItem[5]}</strong>
+                  </div>
+                  <div className="rounded-[8px] bg-[#1d3351] p-3">
+                    <span className="block text-[11px] text-[#91a8c7]">Address</span>
+                    <strong className="mt-1 block">{selectedInventoryItem[6]}</strong>
+                  </div>
+                  <div className="rounded-[8px] bg-[#1d3351] p-3">
+                    <span className="block text-[11px] text-[#91a8c7]">Unit price</span>
+                    <strong className="mt-1 block">{selectedInventoryItem[7]}</strong>
+                  </div>
+                  <div className="rounded-[8px] bg-[#1d3351] p-3">
+                    <span className="block text-[11px] text-[#91a8c7]">Total cost</span>
+                    <strong className="mt-1 block">{selectedInventoryItem[8]}</strong>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-[8px] border border-[#293f5d] bg-[#1d3351] p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <span className="block text-[11px] text-[#91a8c7]">Current stock</span>
+                      <strong className="mt-1 block text-[25px] text-white">
+                        {selectedInventoryItem[3]}
+                        <span className="ml-2 text-[12px] font-normal text-[#91a8c7]">
+                          / minimum {selectedInventoryItem[4]}
+                        </span>
+                      </strong>
+                    </div>
+                    <span
+                      className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${
+                        selectedInventoryItem[10] === "Low stock"
+                          ? "border-[#ff8f7c] text-[#ff9d8c]"
+                          : "border-[#7bc695] text-[#9be0ae]"
+                      }`}
+                    >
+                      {selectedInventoryItem[10]}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-4 border-t border-[#293d58] pt-4">
+                  <label className="block text-[13px] font-medium text-[#a9bfd9]">
+                    Stock quantity
+                    <input
+                      type="number"
+                      min="1"
+                      max={selectedInventoryItem[3]}
+                      value={stockAdjustment}
+                      onChange={(event) => setStockAdjustment(event.target.value)}
+                      placeholder="Enter quantity"
+                      className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                    />
+                  </label>
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleStockAdjustment("add")}
+                      disabled={!stockAdjustment || Number(stockAdjustment) <= 0}
+                      className="h-11 rounded-[8px] bg-[#4d88e8] text-[13px] font-semibold text-white hover:bg-[#5b96f4] disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      + Add stock
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleStockAdjustment("remove")}
+                      disabled={
+                        !stockAdjustment ||
+                        Number(stockAdjustment) <= 0 ||
+                        Number(stockAdjustment) > Number(selectedInventoryItem[3])
+                      }
+                      className="h-11 rounded-[8px] border border-[#ff8f7c] text-[13px] font-semibold text-[#ffad9f] hover:bg-[#3a2b35] disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      - Remove stock
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <footer className="flex justify-end border-t border-[#293d58] px-7 py-4 max-[620px]:px-5">
+                <button
+                  type="button"
+                  onClick={() => setSelectedItemCode(null)}
+                  className="h-11 rounded-[8px] border border-[#293f5d] px-5 text-[13px] text-[#e5edf8] hover:bg-[#1d3351]"
+                >
+                  Close
+                </button>
+              </footer>
+            </section>
+          </div>
+        )}
+
+        {isAddNewItem && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-[#071426]/75 p-4 backdrop-blur-[2px] max-[620px]:items-end max-[620px]:p-0"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setIsAddNewItem(false);
+            }}
+          >
+            <section
+              role="dialog"
+              aria-labelledby="add-new-item-title"
+              className="flex max-h-[92vh] w-full max-w-[890px] flex-col overflow-hidden rounded-[17px] border border-[#263c5a] bg-[#172a44] text-[#e5edf8] shadow-[0_24px_80px_rgb(0_0_0_/_45%)] max-[620px]:max-h-[94vh] max-[620px]:rounded-b-none max-[620px]:rounded-t-[16px]"
+            >
+              <header className="flex shrink-0 items-start justify-between border-b border-[#293d58] px-7 py-5 max-[620px]:px-5 max-[620px]:py-4">
+                <div>
+                  <p className="m-0 text-[12px] font-semibold uppercase tracking-[.1em] text-[#91a8c7]">
+                    Stock Ledger / Inventory
+                  </p>
+                  <h2
+                    id="add-new-item-title"
+                    className="m-0 mt-1 text-[27px] font-bold text-[white] max-[620px]:text-[23px]"
+                  >
+                    Add New Item
+                  </h2>
+                  <p className="m-0 mt-1 text-[15px] text-[#99afc9]">
+                    Add a new part or equipment item to the stock ledger.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAddNewItem(false)}
+                  className="grid h-8 w-8 place-items-center text-[27px] leading-none text-[#91a8c7] hover:text-white"
+                >
+                  ×
+                </button>
+              </header>
+
+              <form
+                id="add-new-item-form"
+                className="min-h-0 flex-1 overflow-y-auto px-7 py-5 max-[620px]:px-5"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setIsAddNewItem(false);
+                }}
+              >
+                <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
+                  <label className="col-span-2 text-[14px] font-medium text-[#a9bfd9] max-[620px]:col-span-1">
+                    Part Name <span className="text-[#ff6557]">*</span>
+                    <input
+                      required
+                      autoFocus
+                      name="partName"
+                      placeholder="e.g. PIR Motion Detector"
+                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                    />
+                  </label>
+                </div>
+
+                <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
+                  <label className="text-[14px] font-medium text-[#a9bfd9]">
+                    Quantity <span className="text-[#ff6557]">*</span>
+                    <input
+                      required
+                      type="number"
+                      min="0"
+                      name="quantity"
+                      value={newItemQuantity}
+                      onChange={(event) => setNewItemQuantity(event.target.value)}
+                      placeholder="e.g. 8"
+                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                    />
+                  </label>
+                  <label className="text-[14px] font-medium text-[#a9bfd9]">
+                    Minimum Stock Threshold <span className="text-[#ff6557]">*</span>
+                    <input
+                      required
+                      type="number"
+                      min="0"
+                      name="minimumStock"
+                      placeholder="e.g. 10"
+                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                    />
+                  </label>
+                </div>
+
+                <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
+                  <label className="text-[14px] font-medium text-[#a9bfd9]">
+                    Branch <span className="text-[#ff6557]">*</span>
+                    <select
+                      required
+                      name="branch"
+                      defaultValue="Makati"
+                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
+                    >
+                      <option>Makati</option>
+                      <option>Cebu</option>
+                    </select>
+                  </label>
+                  <label className="text-[14px] font-medium text-[#a9bfd9]">
+                    Address <span className="text-[#ff6557]">*</span>
+                    <input
+                      required
+                      name="address"
+                      placeholder="e.g. Room 823, 8th Floor"
+                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                    />
+                  </label>
+                </div>
+
+                <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
+                  <label className="text-[14px] font-medium text-[#a9bfd9]">
+                    Unit Price <span className="text-[#ff6557]">*</span>
+                    <input
+                      required
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      name="unitPrice"
+                      value={newItemUnitPrice}
+                      onChange={(event) => setNewItemUnitPrice(event.target.value)}
+                      placeholder="e.g. 850"
+                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                    />
+                  </label>
+                  <div className="flex flex-col justify-end text-[14px] font-medium text-[#a9bfd9]">
+                    <span>Calculated Total Cost</span>
+                    <output className="mt-1.5 flex h-12 items-center rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] font-semibold text-white">
+                      ₱{newItemTotalCost.toLocaleString("en-PH", {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2,
+                      })}
+                    </output>
+                  </div>
+                </div>
+
+                <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
+                  <label className="col-span-2 text-[14px] font-medium text-[#a9bfd9] max-[620px]:col-span-1">
+                    Category <span className="text-[#ff6557]">*</span>
+                    <select
+                      required
+                      name="category"
+                      defaultValue="Intrusion"
+                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
+                    >
+                      <option>Power</option>
+                      <option>Intrusion</option>
+                      <option>Access</option>
+                      <option>CCTV</option>
+                    </select>
+                  </label>
+                </div>
+
+                <label className="mt-4 block text-[14px] font-medium text-[#a9bfd9]">
+                  Notes / Remarks
+                  <textarea
+                    name="notes"
+                    rows="3"
+                    placeholder="Add supplier information, specifications, or notes..."
+                    className="mt-1.5 w-full resize-y rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 py-3 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                  />
+                </label>
+              </form>
+
+              <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-[#293d58] bg-[#172a44] px-7 py-4 max-[620px]:flex-col max-[620px]:items-stretch max-[620px]:px-5">
+                <span className="text-[14px] text-[#91a8c7]">
+                  Inventory item details
+                </span>
+                <div className="flex gap-3 max-[420px]:flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => setIsAddNewItem(false)}
+                    className="h-[50px] rounded-[10px] border border-[#293f5d] px-5 text-[14px] text-[#e5edf8] hover:bg-[#1d3351]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    form="add-new-item-form"
+                    className="h-[50px] rounded-[10px] bg-[#4d88e8] px-5 text-[14px] font-semibold text-white hover:bg-[#5b96f4] max-[420px]:flex-1"
+                  >
+                    Add New Item
+                  </button>
+                </div>
+              </footer>
+            </section>
+          </div>
+        )}
 
         {/* Modal */}
         {isCreateRequisition && (
