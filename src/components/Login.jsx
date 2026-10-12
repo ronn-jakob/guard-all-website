@@ -1,25 +1,30 @@
 import guardAllLogo from "../images/Guard All Logo Blue.png";
 import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
+import { callAuthFunction, setSession } from "../lib/auth.js";
 const Login = () => {
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
-    const adminPassword = localStorage.getItem("adminPassword") || "admin123";
-    const isAdmin =
-      formData.get("email") === "admin@gmail.com" &&
-      formData.get("password") === adminPassword;
-
-    if (isAdmin) {
-      sessionStorage.setItem("isAdmin", "true");
-    } else {
-      sessionStorage.removeItem("isAdmin");
+    setFormError("");
+    setIsSubmitting(true);
+    try {
+      const session = await callAuthFunction("login", {
+        email: formData.get("email"),
+        password: formData.get("password"),
+      });
+      setSession(session);
+      navigate(session.user.role === "Admin" ? "/account" : "/dashboard");
+    } catch (error) {
+      setFormError(error.message);
+    } finally {
+      setIsSubmitting(false);
     }
-
-    navigate(isAdmin ? "/account" : "/dashboard");
   };
 
   return (
@@ -90,10 +95,16 @@ const Login = () => {
 
             <button
               type="submit"
-              className="mt-6 h-[43px] rounded-[24px] border-0 bg-[#2057a2] text-[14px] font-bold text-white transition hover:bg-[#17488c] active:translate-y-px"
+              disabled={isSubmitting}
+              className="mt-6 h-[43px] rounded-[24px] border-0 bg-[#2057a2] text-[14px] font-bold text-white transition hover:bg-[#17488c] active:translate-y-px disabled:cursor-wait disabled:opacity-60"
             >
-              Login
+              {isSubmitting ? "Signing in..." : "Login"}
             </button>
+            {formError && (
+              <p className="m-0 text-center text-[11px] text-[#b64132]" role="alert">
+                {formError}
+              </p>
+            )}
           </form>
         </div>
       </section>

@@ -1,19 +1,32 @@
 import { useState } from "react";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
+import { callAuthFunction, getSession, setSession } from "../lib/auth.js";
+
+function splitDisplayName(displayName = "") {
+  const nameParts = displayName.trim().split(/\s+/).filter(Boolean);
+  return {
+    firstName: nameParts[0] || "",
+    lastName: nameParts.slice(1).join(" "),
+  };
+}
 
 function Settings() {
+  const sessionUser = getSession()?.user;
+  const profilePhotoKey = sessionUser?.id
+    ? `profilePhoto:${sessionUser.id}`
+    : "profilePhoto";
   const [profile, setProfile] = useState(() => ({
-    name: localStorage.getItem("profileName") || "R. Jakob",
-    email: localStorage.getItem("profileEmail") || "admin@gmail.com",
+    ...splitDisplayName(sessionUser?.name || localStorage.getItem("profileName") || ""),
+    email: sessionUser?.email || localStorage.getItem("profileEmail") || "",
     phone: localStorage.getItem("profilePhone") || "",
-    title: localStorage.getItem("profileTitle") || "Website Admin",
+    title: sessionUser?.role || localStorage.getItem("profileTitle") || "",
   }));
   const [formError, setFormError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [profileMessage, setProfileMessage] = useState("");
   const [profilePhoto, setProfilePhoto] = useState(
-    () => localStorage.getItem("profilePhoto") || "",
+    () => localStorage.getItem(profilePhotoKey) || localStorage.getItem("profilePhoto") || "",
   );
   const [showPasswords, setShowPasswords] = useState(false);
 
@@ -30,7 +43,7 @@ function Settings() {
     reader.onload = () => {
       const photo = String(reader.result);
       setProfilePhoto(photo);
-      localStorage.setItem("profilePhoto", photo);
+      localStorage.setItem(profilePhotoKey, photo);
       window.dispatchEvent(new Event("profile-updated"));
       setProfileMessage("Profile photo updated.");
     };
@@ -39,7 +52,7 @@ function Settings() {
 
   const handlePhotoRemove = () => {
     setProfilePhoto("");
-    localStorage.removeItem("profilePhoto");
+    localStorage.removeItem(profilePhotoKey);
     window.dispatchEvent(new Event("profile-updated"));
     setProfileMessage("Profile photo removed.");
   };
@@ -47,34 +60,43 @@ function Settings() {
   const handleProfileSave = (event) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    const firstName = formData.get("firstName").trim();
+    const lastName = formData.get("lastName").trim();
     const nextProfile = {
-      name: formData.get("name").trim(),
+      firstName,
+      lastName,
       email: formData.get("email").trim().toLowerCase(),
       phone: formData.get("phone").trim(),
       title: formData.get("title").trim(),
     };
 
     setProfile(nextProfile);
-    localStorage.setItem("profileName", nextProfile.name);
+    localStorage.setItem("profileName", [firstName, lastName].filter(Boolean).join(" "));
     localStorage.setItem("profileEmail", nextProfile.email);
     localStorage.setItem("profilePhone", nextProfile.phone);
     localStorage.setItem("profileTitle", nextProfile.title);
+    const currentSession = getSession();
+    if (currentSession?.user) {
+      setSession({
+        ...currentSession,
+        user: {
+          ...currentSession.user,
+          name: [firstName, lastName].filter(Boolean).join(" "),
+          email: nextProfile.email,
+        },
+      });
+      window.dispatchEvent(new Event("account-updated"));
+    }
     setProfileMessage("Personal information saved.");
   };
 
-  const handlePasswordChange = (event) => {
+  const handlePasswordChange = async (event) => {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const formData = new FormData(form);
     const currentPassword = formData.get("currentPassword");
     const newPassword = formData.get("newPassword");
     const confirmPassword = formData.get("confirmPassword");
-    const storedPassword = localStorage.getItem("adminPassword") || "admin123";
-
-    if (currentPassword !== storedPassword) {
-      setFormError("Your current password is incorrect.");
-      setSuccessMessage("");
-      return;
-    }
 
     if (newPassword !== confirmPassword) {
       setFormError("The new passwords do not match.");
@@ -82,10 +104,18 @@ function Settings() {
       return;
     }
 
-    localStorage.setItem("adminPassword", newPassword);
-    setFormError("");
-    setSuccessMessage("Your password has been updated.");
-    event.currentTarget.reset();
+    try {
+      await callAuthFunction("change-password", {
+        currentPassword,
+        newPassword,
+      });
+      setFormError("");
+      setSuccessMessage("Your password has been updated.");
+      form.reset();
+    } catch (error) {
+      setFormError(error.message);
+      setSuccessMessage("");
+    }
   };
 
   return (
@@ -174,12 +204,22 @@ function Settings() {
                   </div>
                 </div>
                 <label className="flex flex-col gap-1.5 text-[12px] font-semibold text-[#45515c]">
-                  Full name
+                  First name
                   <input
                     className="h-11 rounded-[6px] border border-[#d6dee6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
-                    name="name"
-                    value={profile.name}
-                    onChange={(event) => setProfile({ ...profile, name: event.target.value })}
+                    name="firstName"
+                    value={profile.firstName}
+                    onChange={(event) => setProfile({ ...profile, firstName: event.target.value })}
+                    required
+                  />
+                </label>
+                <label className="flex flex-col gap-1.5 text-[12px] font-semibold text-[#45515c]">
+                  Last name
+                  <input
+                    className="h-11 rounded-[6px] border border-[#d6dee6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
+                    name="lastName"
+                    value={profile.lastName}
+                    onChange={(event) => setProfile({ ...profile, lastName: event.target.value })}
                     required
                   />
                 </label>
@@ -208,10 +248,10 @@ function Settings() {
                 <label className="flex flex-col gap-1.5 text-[12px] font-semibold text-[#45515c]">
                   Job title
                   <input
-                    className="h-11 rounded-[6px] border border-[#d6dee6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
+                    className="h-11 cursor-default rounded-[6px] border border-[#d6dee6] bg-[#f8fbff] px-3 text-[13px] text-[#273746] outline-none"
                     name="title"
                     value={profile.title}
-                    onChange={(event) => setProfile({ ...profile, title: event.target.value })}
+                    readOnly
                     required
                   />
                 </label>
@@ -220,15 +260,17 @@ function Settings() {
                     {profileMessage}
                   </p>
                 )}
-                <button
-                  className="col-start-2 flex h-11 items-center justify-center gap-2 rounded-[6px] border-0 bg-[#1250a0] px-4 text-[13px] font-bold text-white transition hover:bg-[#0e4389] max-[620px]:col-start-1"
-                  type="submit"
-                >
-                  <span className="material-symbols-outlined text-[18px]">
-                    save
-                  </span>
-                  Save personal information
-                </button>
+                <div className="col-span-full grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
+                  <button
+                    className="col-start-2 flex h-11 w-full items-center justify-center gap-2 rounded-[6px] border-0 bg-[#1250a0] px-4 text-[13px] font-bold text-white transition hover:bg-[#0e4389] max-[620px]:col-start-1"
+                    type="submit"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">
+                      save
+                    </span>
+                    Save personal information
+                  </button>
+                </div>
               </form>
             </section>
             <section className="overflow-hidden rounded-[10px] border border-[#dfe6ec] bg-white shadow-[0_3px_8px_rgb(31_59_82_/_10%)]">

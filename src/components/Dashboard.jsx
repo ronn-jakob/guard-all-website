@@ -1,5 +1,6 @@
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
+import { getSession } from "../lib/auth.js";
 
 const metrics = [
   [
@@ -86,6 +87,12 @@ const label =
   "m-0 text-[10px] font-bold uppercase tracking-[.12em] text-[#777e85]";
 
 function Dashboard() {
+  const accountName = getSession()?.user?.name || "";
+  const nameParts = accountName.trim().split(/\s+/).filter(Boolean);
+  const greetingName = nameParts.length > 1
+    ? `${nameParts[0][0].toUpperCase()}. ${nameParts.slice(1).join(" ")}`
+    : accountName;
+
   return (
     <main className="flex h-screen overflow-hidden bg-[#1f2022] font-sans text-[#063b7c] max-[1024px]:block">
       <Sidebar />
@@ -93,7 +100,7 @@ function Dashboard() {
         <TopBar />
         <div className="px-8 pb-6 pt-9 max-[1024px]:px-6 max-[1024px]:pb-20 max-[1024px]:pt-5 max-[620px]:px-3">
           <h1 className="m-0 mb-6 text-[30px] font-bold tracking-[-.5px] max-[1024px]:text-[24px] max-[620px]:mb-4 max-[620px]:text-[19px]">
-            Good morning, R. Jakob
+            Good morning, {greetingName}
           </h1>
           <section className="grid grid-cols-4 gap-[18px] max-[1024px]:grid-cols-2 max-[620px]:grid-cols-1 max-[620px]:gap-1">
             {metrics.map(([icon, title, value, note, tone, alert]) => (

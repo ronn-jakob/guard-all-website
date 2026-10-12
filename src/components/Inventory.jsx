@@ -79,6 +79,7 @@ const metricCards = [
 ];
 
 const branchOptions = ["All branches", "Makati", "Cebu"];
+const categoryOptions = ["All categories", "Power", "Intrusion", "Access", "CCTV"];
 
 function Inventory() {
   const [inventoryRecords, setInventoryRecords] = useState(inventoryItems);
@@ -96,15 +97,21 @@ function Inventory() {
   const [selectedBranch, setSelectedBranch] = useState("All branches");
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const branchDropdownRef = useRef(null);
+  const [selectedCategory, setSelectedCategory] = useState("All categories");
+  const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
+  const categoryDropdownRef = useRef(null);
 
   // Close branch dropdown on outside click
   useEffect(() => {
     function handleClickOutside(event) {
       if (
         branchDropdownRef.current &&
-        !branchDropdownRef.current.contains(event.target)
+        !branchDropdownRef.current.contains(event.target) &&
+        categoryDropdownRef.current &&
+        !categoryDropdownRef.current.contains(event.target)
       ) {
         setIsBranchDropdownOpen(false);
+        setIsCategoryDropdownOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -114,8 +121,14 @@ function Inventory() {
   // Filter inventory items based on selected branch
   const filteredInventoryItems = inventoryRecords.filter((item) => {
     const itemBranch = item[5]; // Index 5 holds branch name
-    if (selectedBranch === "All branches") return true;
-    return itemBranch.toLowerCase() === selectedBranch.toLowerCase();
+    const itemCategory = item[9]; // Index 9 holds category
+    const matchesBranch =
+      selectedBranch === "All branches" ||
+      itemBranch.toLowerCase() === selectedBranch.toLowerCase();
+    const matchesCategory =
+      selectedCategory === "All categories" ||
+      itemCategory.toLowerCase() === selectedCategory.toLowerCase();
+    return matchesBranch && matchesCategory;
   });
   const hasInventoryItems = filteredInventoryItems.length > 0;
   const newItemTotalCost =
@@ -287,6 +300,48 @@ function Inventory() {
                     </div>
                   )}
                 </div>
+                <div className="relative" ref={categoryDropdownRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsCategoryDropdownOpen((prev) => !prev)}
+                    className="flex h-9 items-center gap-2 rounded-[6px] border border-[#d9dfe4] bg-[#f8f9fa] px-3 text-[11px] font-medium text-[#174f9a] transition-colors hover:bg-[#eff4f9] max-[620px]:hidden"
+                  >
+                    <span className="material-symbols-outlined text-[17px]">
+                      tune
+                    </span>{" "}
+                    {selectedCategory}
+                    <span className="material-symbols-outlined text-[16px] text-[#777e85]">
+                      arrow_drop_down
+                    </span>
+                  </button>
+
+                  {isCategoryDropdownOpen && (
+                    <div className="absolute right-0 z-30 mt-1.5 w-44 rounded-[8px] border border-[#d9dfe4] bg-white p-1 shadow-[0_8px_20px_rgba(0,0,0,0.12)]">
+                      {categoryOptions.map((category) => (
+                        <button
+                          key={category}
+                          type="button"
+                          onClick={() => {
+                            setSelectedCategory(category);
+                            setIsCategoryDropdownOpen(false);
+                          }}
+                          className={`flex w-full items-center justify-between rounded-[5px] px-3 py-2 text-left text-[11px] transition-colors ${
+                            selectedCategory === category
+                              ? "bg-[#e8f1fd] font-bold text-[#1250a0]"
+                              : "text-[#3a434d] hover:bg-[#f1f5f9]"
+                          }`}
+                        >
+                          <span>{category}</span>
+                          {selectedCategory === category && (
+                            <span className="material-symbols-outlined text-[14px]">
+                              check
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   title={
@@ -318,7 +373,7 @@ function Inventory() {
 
             {filteredInventoryItems.length === 0 ? (
               <div className="py-12 text-center text-[13px] text-[#8e959b]">
-                No inventory items found for <strong>{selectedBranch}</strong>.
+                No inventory items found for <strong>{selectedBranch}</strong> and <strong>{selectedCategory}</strong>.
               </div>
             ) : (
               filteredInventoryItems.map(
@@ -803,15 +858,16 @@ function Inventory() {
                     />
                   </label>
                   <label className="text-[14px] font-medium text-[#a9bfd9]">
-                    Minimum Stock Threshold{" "}
-                    <span className="text-[#ff6557]">*</span>
-                    <input
-                      required
-                      type="number"
-                      min="0"
-                      placeholder="e.g. 10"
-                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
-                    />
+                    Category <span className="text-[#ff6557]">*</span>
+                    <select
+                      defaultValue="Intrusion"
+                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
+                    >
+                      <option>Power</option>
+                      <option>Intrusion</option>
+                      <option>Access</option>
+                      <option>CCTV</option>
+                    </select>
                   </label>
                 </div>
 
@@ -827,18 +883,7 @@ function Inventory() {
                     </select>
                   </label>
 
-                  <label className="text-[14px] font-medium text-[#a9bfd9]">
-                    Category <span className="text-[#ff6557]">*</span>
-                    <select
-                      defaultValue="Intrusion"
-                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
-                    >
-                      <option>Power</option>
-                      <option>Intrusion</option>
-                      <option>Access</option>
-                      <option>CCTV</option>
-                    </select>
-                  </label>
+                  
                 </div>
 
                 <fieldset className="mb-4 border-0 p-0">

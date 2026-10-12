@@ -1,42 +1,56 @@
 import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import logo from "../images/Guard All Logo White.png";
+import { canAccessModule, clearSession, getSession } from "../lib/auth.js";
 
 const primaryNavigation = [
-  ["dashboard", "Dashboard", "/dashboard"],
-  ["calendar_month", "Scheduling", "/scheduling"],
-  ["inventory_2", "Inventory", "/inventory"],
-  ["assignment", "Field Reports", "/reports"],
-  ["sell", "Sales & Billing", "/billing"],
+  ["dashboard", "Dashboard", "/dashboard", null],
+  ["calendar_month", "Scheduling", "/scheduling", "scheduling"],
+  ["inventory_2", "Inventory", "/inventory", "inventory"],
+  ["assignment", "Field Reports", "/reports", "field_reporting"],
+  ["sell", "Sales & Billing", "/billing", "sales_billing"],
 ];
 
 function Sidebar() {
-  const [isAdmin, setIsAdmin] = useState(
-    () => sessionStorage.getItem("isAdmin") === "true",
-  );
+  const [session, setSession] = useState(() => getSession());
+  const role = session?.user?.role;
+  const displayName = session?.user?.name || "Account";
+  const nameParts = displayName.trim().split(/\s+/).filter(Boolean);
+  const initials = nameParts
+    .map((part) => part[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  const profilePhotoKey = session?.user?.id
+    ? `profilePhoto:${session.user.id}`
+    : "profilePhoto";
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profilePhoto, setProfilePhoto] = useState(
-    () => localStorage.getItem("profilePhoto") || "",
+    () => localStorage.getItem(profilePhotoKey) || localStorage.getItem("profilePhoto") || "",
   );
   const navigate = useNavigate();
 
   useEffect(() => {
     const handleProfileUpdate = () => {
-      setProfilePhoto(localStorage.getItem("profilePhoto") || "");
+      setProfilePhoto(localStorage.getItem(profilePhotoKey) || "");
     };
+    const handleAccountUpdate = () => setSession(getSession());
 
     window.addEventListener("profile-updated", handleProfileUpdate);
-    return () => window.removeEventListener("profile-updated", handleProfileUpdate);
+    window.addEventListener("account-updated", handleAccountUpdate);
+    return () => {
+      window.removeEventListener("profile-updated", handleProfileUpdate);
+      window.removeEventListener("account-updated", handleAccountUpdate);
+    };
   }, []);
 
-  const adminNavigation = isAdmin
-    ? [["manage_accounts", "Manage Accounts", "/account"]]
-    : [];
-  const navigation = [...primaryNavigation, ...adminNavigation];
+  const navigation = [
+    ...primaryNavigation,
+    ["manage_accounts", "Manage Accounts", "/account", "admin"],
+  ];
   const handleLogout = () => {
-    sessionStorage.removeItem("isAdmin");
-    setIsAdmin(false);
+    clearSession();
     setProfileOpen(false);
     navigate("/");
   };
@@ -66,28 +80,51 @@ function Sidebar() {
           Operation console
         </p>
         <nav className="space-y-1 max-[1024px]:flex max-[1024px]:flex-col max-[1024px]:gap-1">
-          {navigation.map(([icon, name, path]) => (
-            <NavLink
-              className={({ isActive }) =>
-                `group relative flex h-10 items-center gap-3 rounded-[7px] px-3.5 text-[13px] font-medium no-underline transition-all max-[1024px]:h-10 max-[1024px]:w-full max-[1024px]:justify-start max-[1024px]:gap-3 max-[1024px]:whitespace-nowrap max-[1024px]:px-3 max-[1024px]:text-[12px] ${isActive ? "bg-white font-bold text-[#174f9a] shadow-[0_3px_10px_rgb(3_36_79_/_18%)]" : "text-[#eef5ff] hover:bg-white/10 hover:text-white"}`
-              }
-              to={path}
-              key={name}
-            >
-              {({ isActive }) => (
-                <>
-                  <span
-                    className={`grid h-6 w-6 place-items-center rounded-[4px] transition-colors ${isActive ? "bg-[#dceaff] text-[#14519f]" : "bg-white/10 text-[#dceaff] group-hover:bg-white/15"}`}
-                  >
-                    <span className="material-symbols-outlined text-[18px]">
-                      {icon}
-                    </span>
+          {navigation.map(([icon, name, path, module]) => {
+            const enabled = !module || canAccessModule(module, role);
+            const targetPath = name === "Field Reports" && role === "Technician"
+              ? "/reports/new"
+              : path;
+            const content = (isActive = false) => (
+              <>
+                <span
+                  className={`grid h-6 w-6 place-items-center rounded-[4px] transition-colors ${isActive ? "bg-[#dceaff] text-[#14519f]" : "bg-white/10 text-[#dceaff] group-hover:bg-white/15"}`}
+                >
+                  <span className="material-symbols-outlined text-[18px]">
+                    {icon}
                   </span>
-                  {name}
-                </>
-              )}
-            </NavLink>
-          ))}
+                </span>
+                {name}
+                {!enabled && <span className="material-symbols-outlined ml-auto text-[15px] opacity-70">lock</span>}
+              </>
+            );
+
+            if (!enabled) {
+              return (
+                <button
+                  className="group relative flex h-10 w-full cursor-not-allowed items-center gap-3 rounded-[7px] border-0 bg-transparent px-3.5 text-left text-[13px] font-medium text-white/45 max-[1024px]:h-10 max-[1024px]:px-3 max-[1024px]:text-[12px]"
+                  key={name}
+                  onClick={(event) => event.preventDefault()}
+                  title="Your role does not have access to this module"
+                  type="button"
+                >
+                  {content()}
+                </button>
+              );
+            }
+
+            return (
+              <NavLink
+                className={({ isActive }) =>
+                  `group relative flex h-10 items-center gap-3 rounded-[7px] px-3.5 text-[13px] font-medium no-underline transition-all max-[1024px]:h-10 max-[1024px]:w-full max-[1024px]:justify-start max-[1024px]:gap-3 max-[1024px]:whitespace-nowrap max-[1024px]:px-3 max-[1024px]:text-[12px] ${isActive ? "bg-white font-bold text-[#174f9a] shadow-[0_3px_10px_rgb(3_36_79_/_18%)]" : "text-[#eef5ff] hover:bg-white/10 hover:text-white"}`
+                }
+                to={targetPath}
+                key={name}
+              >
+                {({ isActive }) => content(isActive)}
+              </NavLink>
+            );
+          })}
         </nav>
         <div className="mt-5 hidden border-t border-white/15 pt-4 max-[1024px]:block">
           <button
@@ -99,13 +136,13 @@ function Sidebar() {
               <img className="h-8 w-8 rounded-full object-cover" src={profilePhoto} alt="" />
             ) : (
               <div className="grid h-8 w-8 place-items-center rounded-full bg-[#ff4825] text-[10px] font-bold">
-                RJ
+                {initials}
               </div>
             )}
             <div>
-              <strong className="block text-[12px]">R. Jakob</strong>
+              <strong className="block text-[12px]">{displayName}</strong>
               <small className="block text-[10px] text-[#d6e4f9]">
-                {isAdmin ? "Website Admin" : "Service Manager"}
+                {role || "No role"}
               </small>
             </div>
             <span className="material-symbols-outlined ml-auto text-[18px]">
@@ -146,13 +183,13 @@ function Sidebar() {
             <img className="h-9 w-9 flex-none rounded-full object-cover" src={profilePhoto} alt="" />
           ) : (
             <div className="grid h-9 w-9 flex-none place-items-center rounded-full bg-[#ff4825] text-[12px] font-bold">
-              RJ
+                {initials}
             </div>
           )}
           <div>
-            <strong className="block text-[13px]">R. Jakob</strong>
+              <strong className="block text-[13px]">{displayName}</strong>
             <small className="block text-[11px] text-[#d6e4f9]">
-              {isAdmin ? "Website Admin" : "Service Manager"}
+                {role || "No role"}
             </small>
           </div>
           <span

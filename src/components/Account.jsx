@@ -1,19 +1,39 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
+import { callAuthFunction } from "../lib/auth.js";
 
-const roles = ["Administrator", "Operations Manager", "Technician", "Billing Staff"];
+const roles = ["Admin", "Service Manager", "Warehouse Manager", "Technician", "Billing Staff"];
 const branches = ["Makati", "Cebu"];
+const normalizeAccountRole = (account) =>
+  account.role === "Sales Manager"
+    ? { ...account, role: "Service Manager" }
+    : account;
 
 function Account() {
   const [accounts, setAccounts] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [formError, setFormError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
   const [resetRequest, setResetRequest] = useState(() => {
     const storedRequest = localStorage.getItem("passwordResetRequest");
     return storedRequest ? JSON.parse(storedRequest) : null;
   });
+
+  useEffect(() => {
+    let isMounted = true;
+    callAuthFunction("list-users")
+      .then(({ accounts: storedAccounts }) => {
+        if (isMounted) setAccounts((storedAccounts || []).map(normalizeAccountRole));
+      })
+      .catch((error) => {
+        if (isMounted) setFormError(error.message);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const filteredAccounts = accounts.filter((account) =>
     `${account.name} ${account.email} ${account.role}`
@@ -35,7 +55,7 @@ function Account() {
     setResetRequest(null);
   };
 
-  const handleCreateAccount = (event) => {
+  const handleCreateAccount = async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
     const formData = new FormData(form);
@@ -44,33 +64,26 @@ function Account() {
     const name = [firstName, lastName].filter(Boolean).join(" ");
     const email = formData.get("email").trim().toLowerCase();
     const role = formData.get("role");
-    const branch = formData.get("branch");
+    const branch = formData.get("branch").toLowerCase();
+    const authRole = role === "Service Manager" ? "Sales Manager" : role;
 
-    if (accounts.some((account) => account.email === email)) {
-      setFormError("An account with this email address already exists.");
-      setSuccessMessage("");
-      return;
-    }
-
-    setAccounts((currentAccounts) => [
-      {
-        id: `GA-${String(Date.now()).slice(-6)}`,
-        name,
+    try {
+      const { account } = await callAuthFunction("create-account", {
+        firstName,
+        lastName,
         email,
-        role,
+        role: authRole,
         branch,
-        status: "Active",
-        createdAt: new Date().toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-          year: "numeric",
-        }),
-      },
-      ...currentAccounts,
-    ]);
-    setFormError("");
-    setSuccessMessage(`Account created for ${name}.`);
-    form.reset();
+        password: formData.get("password"),
+      });
+      setAccounts((currentAccounts) => [normalizeAccountRole(account), ...currentAccounts]);
+      setFormError("");
+      setSuccessMessage(`Account created for ${name}.`);
+      form.reset();
+    } catch (error) {
+      setFormError(error.message);
+      setSuccessMessage("");
+    }
   };
 
   return (
@@ -261,16 +274,29 @@ function Account() {
                   >
                     Temporary password
                   </label>
-                  <input
-                    className="h-11 rounded-[6px] border border-[#d6dee6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
-                    id="account-password"
-                    name="password"
-                    type="password"
-                    placeholder="At least 8 characters"
-                    autoComplete="new-password"
-                    minLength={8}
-                    required
-                  />
+                  <div className="relative">
+                    <input
+                      className="h-11 w-full rounded-[6px] border border-[#d6dee6] bg-white px-3 pr-11 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
+                      id="account-password"
+                      name="password"
+                      type={showTemporaryPassword ? "text" : "password"}
+                      placeholder="At least 8 characters"
+                      autoComplete="new-password"
+                      minLength={8}
+                      required
+                    />
+                    <button
+                      aria-label={showTemporaryPassword ? "Hide password" : "Show password"}
+                      className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center border-0 bg-transparent p-0 text-[#6f7f91] transition-colors hover:text-[#14519f]"
+                      onClick={() => setShowTemporaryPassword((isVisible) => !isVisible)}
+                      title={showTemporaryPassword ? "Hide password" : "Show password"}
+                      type="button"
+                    >
+                      <span className="material-symbols-outlined text-[18px] leading-none">
+                        {showTemporaryPassword ? "visibility" : "visibility_off"}
+                      </span>
+                    </button>
+                  </div>
                 </div>
 
                 {formError && (
