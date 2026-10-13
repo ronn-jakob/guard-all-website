@@ -1,74 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
-
-const technicianOptions = [
-  "Jordan Lee",
-  "Maya Santos",
-  "Donnie Ramos",
-  "Lanie Santos",
-];
-
-const schedule = [
-  [
-    "09:00",
-    "TODAY",
-    "Harborview Residences",
-    "WO-88429",
-    "Preventive maintenance",
-    "Makati - Tower 2",
-    "Maya Santos",
-    "Available",
-  ],
-  [
-    "10:30",
-    "TODAY",
-    "Northbridge Dental Clinic",
-    "WO-88431",
-    "Service call",
-    "Makati - West Avenue",
-    "Jordan Lee",
-    "1 Shortage",
-  ],
-  [
-    "13:00",
-    "TODAY",
-    "Pioneer Cold Storage",
-    "WO-88432",
-    "CCTV expansion",
-    "Cebu - Mandaue",
-    "Donnie Ramos",
-    "Available",
-  ],
-  [
-    "08:30",
-    "TOMORROW",
-    "Lakeside Corporate Center",
-    "WO-88433",
-    "Access control install",
-    "Makati - BGC",
-    "Lanie Santos",
-    "Review",
-  ],
-  [
-    "09:00",
-    "TOMORROW",
-    "St. Catherine Hospital",
-    "WO-88434",
-    "Quarterly inspection",
-    "Cebu - Lahug",
-    "Jun Reyes",
-    "Available",
-  ],
-];
-
-const scheduledJobDates = {
-  "WO-88429": new Date(2026, 8, 1),
-  "WO-88431": new Date(2026, 8, 1),
-  "WO-88432": new Date(2026, 8, 1),
-  "WO-88433": new Date(2026, 8, 2),
-  "WO-88434": new Date(2026, 8, 2),
-};
+import { callAuthFunction, getSession } from "../lib/auth.js";
 
 function formatDateRange(startDate, endDate) {
   const startMonth = startDate.toLocaleString("en-US", { month: "long" });
@@ -105,20 +39,106 @@ function formatSelectedDate(date) {
 }
 
 function Scheduling() {
-  const [selectedOrder, setSelectedOrder] = useState("WO-88431");
+  const [selectedOrder, setSelectedOrder] = useState("");
   const [isCreateJobOpen, setIsCreateJobOpen] = useState(false);
-  const [priority, setPriority] = useState("Normal");
+  const [isEditJobOpen, setIsEditJobOpen] = useState(false);
+  const [editValues, setEditValues] = useState({});
+  const [editTechnicians, setEditTechnicians] = useState([""]);
+  const [editTechnicianOptions, setEditTechnicianOptions] = useState([]);
   const [clientType, setClientType] = useState("Individual");
   const [technicians, setTechnicians] = useState([""]);
-
+  const [technicianOptions, setTechnicianOptions] = useState([]);
+  const [schedule, setSchedule] = useState([]);
+  const [scheduledJobDates, setScheduledJobDates] = useState({});
+  const [formError, setFormError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const sessionUser = getSession()?.user;
+  const confirmedAssignmentsKey = `confirmed-schedule-assignments:${sessionUser?.id ?? "unknown"}`;
+  const [confirmedAssignments, setConfirmedAssignments] = useState(() => {
+    try {
+      const storedAssignments = JSON.parse(localStorage.getItem(confirmedAssignmentsKey) || "[]");
+      return new Set(Array.isArray(storedAssignments) ? storedAssignments : []);
+    } catch {
+      return new Set();
+    }
+  });
+  const defaultBranch = getSession()?.user?.branch === "cebu" ? "Cebu" : "Makati";
+  const navigate = useNavigate();
   // State to manage active view mode ('list' | 'calendar')
   const [viewMode, setViewMode] = useState("list");
-  const [isShortageOptionsOpen, setIsShortageOptionsOpen] = useState(false);
-  const [shortageResolution, setShortageResolution] = useState(null);
   const [rangeStart, setRangeStart] = useState(new Date(2026, 8, 1));
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(
     new Date(2026, 8, 1),
   );
+
+  useEffect(() => {
+    let isMounted = true;
+    callAuthFunction("list-schedules")
+      .then(({ schedules }) => {
+        if (!isMounted || !schedules) return;
+        const nextDates = Object.fromEntries(
+          schedules.map((job) => [job.order, new Date(`${job.date}T00:00:00`)]),
+        );
+        setSchedule(schedules.map((job) => [
+          job.time,
+          job.dayLabel,
+          job.client,
+          job.order,
+          job.service,
+          job.location,
+          job.technician,
+          job.stock,
+          job.technicians,
+        ]));
+        setScheduledJobDates(nextDates);
+        const lastConfirmedOrder = localStorage.getItem(`${confirmedAssignmentsKey}:last`);
+        const lastConfirmedJob = schedules.find((job) => job.order === lastConfirmedOrder);
+        if (lastConfirmedJob) {
+          const confirmedDate = nextDates[lastConfirmedJob.order];
+          setSelectedOrder(lastConfirmedJob.order);
+          setRangeStart(confirmedDate);
+          setSelectedCalendarDate(confirmedDate);
+        }
+      })
+      .catch((error) => {
+        if (isMounted) setFormError(error.message);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [confirmedAssignmentsKey]);
+
+  useEffect(() => {
+    let isMounted = true;
+    callAuthFunction("list-technicians", { date: getDateKey(selectedCalendarDate) })
+      .then(({ technicians: availableTechnicians }) => {
+        if (isMounted) setTechnicianOptions(availableTechnicians || []);
+      })
+      .catch((error) => {
+        if (isMounted) setFormError(error.message);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [selectedCalendarDate]);
+
+  useEffect(() => {
+    if (!isEditJobOpen || !editValues.date) return;
+    let isMounted = true;
+    callAuthFunction("list-technicians", {
+      date: editValues.date,
+      excludeOrder: editValues.order,
+    })
+      .then(({ technicians: availableTechnicians }) => {
+        if (isMounted) setEditTechnicianOptions(availableTechnicians || []);
+      })
+      .catch((error) => {
+        if (isMounted) setFormError(error.message);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [isEditJobOpen, editValues.date, editValues.order]);
 
   const rangeEnd = new Date(
     rangeStart.getFullYear(),
@@ -195,13 +215,121 @@ function Scheduling() {
   }
 
   const selectedJob =
-    schedule.find((job) => job[3] === selectedOrder) ?? schedule[1];
-  const isShortageResolved =
-    selectedJob[3] === "WO-88431" && Boolean(shortageResolution);
+    schedule.find((job) => job[3] === selectedOrder) ?? schedule[0] ?? [
+      "--:--",
+      "",
+      "No scheduled jobs",
+      "",
+      "",
+      "Select a date to view jobs",
+      "Unassigned",
+      "Available",
+    ];
 
-  function handleShortageResolution(resolution) {
-    setShortageResolution(resolution);
-    setIsShortageOptionsOpen(false);
+  function handleConfirmAssignment() {
+    const order = selectedJob[3];
+    if (!order) return;
+    const nextConfirmedAssignments = new Set(confirmedAssignments);
+    nextConfirmedAssignments.add(order);
+    setConfirmedAssignments(nextConfirmedAssignments);
+    localStorage.setItem(confirmedAssignmentsKey, JSON.stringify([...nextConfirmedAssignments]));
+    localStorage.setItem(`${confirmedAssignmentsKey}:last`, order);
+    navigate(`/reports/new?job=${encodeURIComponent(order)}`);
+  }
+
+  async function handleCreateJob(event) {
+    event.preventDefault();
+    setFormError("");
+    setIsSaving(true);
+    const formData = new FormData(event.currentTarget);
+    try {
+      await callAuthFunction("create-schedule", {
+        firstName: formData.get("firstName"),
+        lastName: formData.get("lastName"),
+        clientType: formData.get("clientType"),
+        companyName: formData.get("companyName"),
+        address: formData.get("address"),
+        contactEmail: formData.get("contactEmail"),
+        phoneNumber: formData.get("phoneNumber"),
+        serviceType: formData.get("serviceType"),
+        date: formData.get("date"),
+        startTime: formData.get("startTime"),
+        endTime: formData.get("endTime"),
+        branch: formData.get("branch"),
+        technicianIds: formData.getAll("technicians").filter(Boolean),
+      });
+      const { schedules } = await callAuthFunction("list-schedules");
+      const nextDates = Object.fromEntries(
+        (schedules || []).map((job) => [job.order, new Date(`${job.date}T00:00:00`)]),
+      );
+      setSchedule((schedules || []).map((job) => [
+        job.time,
+        job.dayLabel,
+        job.client,
+        job.order,
+        job.service,
+        job.location,
+        job.technician,
+        job.stock,
+        job.technicians,
+      ]));
+      setScheduledJobDates(nextDates);
+      setTechnicians([""]);
+      setIsCreateJobOpen(false);
+    } catch (error) {
+      setFormError(error.message);
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function openEditJob() {
+    const startTime = selectedJob[0] || "09:00";
+    const [hours, minutes] = startTime.split(":").map(Number);
+    const endDate = new Date(2026, 0, 1, hours + 1, minutes);
+    setEditValues({
+      order: selectedJob[3],
+      serviceType: selectedJob[4] === "Preventive maintenance" ? "Preventive maintenance" : selectedJob[4] === "Installation" ? "Installation" : "Service call",
+      date: getDateKey(scheduledJobDates[selectedJob[3]] || selectedCalendarDate),
+      startTime,
+      endTime: `${String(endDate.getHours()).padStart(2, "0")}:${String(endDate.getMinutes()).padStart(2, "0")}`,
+      branch: selectedJob[5]?.split(" - ")[0] || defaultBranch,
+    });
+    setEditTechnicians(
+      selectedJob[8]?.length ? selectedJob[8].map((technician) => technician.id) : [""],
+    );
+    setFormError("");
+    setIsEditJobOpen(true);
+  }
+
+  async function handleEditJob(event) {
+    event.preventDefault();
+    setFormError("");
+    setIsSaving(true);
+    const formData = new FormData(event.currentTarget);
+    try {
+      await callAuthFunction("update-schedule", {
+        order: formData.get("order"),
+        serviceType: formData.get("serviceType"),
+        date: formData.get("date"),
+        startTime: formData.get("startTime"),
+        endTime: formData.get("endTime"),
+        branch: formData.get("branch"),
+        technicianIds: formData.getAll("technicians").filter(Boolean),
+      });
+      const { schedules } = await callAuthFunction("list-schedules");
+      const nextDates = Object.fromEntries(
+        (schedules || []).map((job) => [job.order, new Date(`${job.date}T00:00:00`)]),
+      );
+      setSchedule((schedules || []).map((job) => [job.time, job.dayLabel, job.client, job.order, job.service, job.location, job.technician, job.stock, job.technicians]));
+      setScheduledJobDates(nextDates);
+      setSelectedCalendarDate(new Date(`${formData.get("date")}T00:00:00`));
+      setIsEditJobOpen(false);
+    } catch (error) {
+      setFormError(error.message);
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   return (
@@ -323,9 +451,6 @@ function Scheduling() {
                         stock,
                       ]) => {
                         const isSelected = selectedOrder === order;
-                        const isShortage =
-                          stock === "1 Shortage" &&
-                          !(order === "WO-88431" && shortageResolution);
                         return (
                           <button
                             type="button"
@@ -365,18 +490,12 @@ function Scheduling() {
                                   {technician}
                                 </span>
                                 <span
-                                  className={`truncate ${
-                                    isShortage
-                                      ? "text-[#e45e4e]"
-                                      : "text-[#5e8e70]"
-                                  }`}
+                                  className="truncate text-[#5e8e70]"
                                 >
                                   <span className="material-symbols-outlined mr-0.5 align-middle text-[14px]">
-                                    {isShortage ? "warning" : "inventory_2"}
+                                    inventory_2
                                   </span>
-                                  {order === "WO-88431" && shortageResolution
-                                    ? "Resolved"
-                                    : stock}
+                                  {stock}
                                 </span>
                               </div>
                             </div>
@@ -509,9 +628,22 @@ function Scheduling() {
                     {selectedJob[5]}
                   </p>
                 </div>
-                <span className="rounded-[6px] bg-white px-3 py-2 text-[9px] text-[#6d879f] shadow-sm">
-                  TODAY
-                </span>
+                <div className="flex items-center gap-2">
+                  {selectedJob[3] && (
+                    <button
+                      type="button"
+                      onClick={openEditJob}
+                      className="grid h-8 w-8 place-items-center rounded-[6px] bg-white text-[#174f9a] shadow-sm hover:bg-[#eaf2fc]"
+                      aria-label="Edit selected work order"
+                      title="Edit selected work order"
+                    >
+                      <span className="material-symbols-outlined text-[17px]">edit</span>
+                    </button>
+                  )}
+                  <span className="rounded-[6px] bg-white px-3 py-2 text-[9px] text-[#6d879f] shadow-sm">
+                    {scheduledJobDates[selectedJob[3]] ? formatSelectedDate(scheduledJobDates[selectedJob[3]]).split(",")[0].toUpperCase() : "SCHEDULED"}
+                  </span>
+                </div>
               </div>
 
               <div className="mt-6 grid grid-cols-2 gap-2 max-[1024px]:mt-4">
@@ -533,57 +665,16 @@ function Scheduling() {
                 </div>
               </div>
 
-              {!isShortageResolved ? (
-                <div className="mt-3 rounded-[7px] border border-[#ff8f7c] bg-[#fff0ed] p-3 text-[#df6657]">
-                  <strong className="flex items-center gap-2 text-[12px] max-[1024px]:text-[9px]">
-                    <span className="material-symbols-outlined text-[17px]">
-                      info
-                    </span>
-                    Real-time stock check: shortage found
-                  </strong>
-                  <p className="m-0 mt-2 text-[10px] leading-relaxed max-[1024px]:text-[8px]">
-                    DMP-145 PIR Motion Detector is 2 units short in Makati.
-                    Requisition or swap the branch before confirming.
-                  </p>
-                  <a
-                    className="mt-2 block text-[10px] font-bold text-[#d35e50]"
-                    href="#shortage"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      setIsShortageOptionsOpen(true);
-                    }}
-                  >
-                    View shortage options{" "}
-                    <span className="material-symbols-outlined align-middle text-[15px]">
-                      chevron_right
-                    </span>
-                  </a>
-                </div>
-              ) : (
-                <div className="mt-3 rounded-[7px] border border-[#a9d7b4] bg-[#eff9f1] p-3 text-[#39734b]">
-                  <strong className="flex items-center gap-2 text-[11px]">
-                    <span className="material-symbols-outlined text-[16px]">
-                      check_circle
-                    </span>
-                    Shortage resolved
-                  </strong>
-                  <p className="m-0 mt-1 text-[9px]">{shortageResolution}</p>
-                </div>
-              )}
-
               <button
                 type="button"
-                disabled={!isShortageResolved}
-                className={`mt-3 flex w-full items-center justify-center gap-2 rounded-[6px] py-3 text-[12px] font-bold text-white max-[1024px]:py-2 max-[1024px]:text-[9px] ${
-                  isShortageResolved
-                    ? "bg-[#1250a0] hover:bg-[#0e4388]"
-                    : "cursor-not-allowed bg-[#86a7d5]"
-                }`}
+                disabled={!selectedJob[3]}
+                onClick={handleConfirmAssignment}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-[6px] bg-[#1250a0] py-3 text-[12px] font-bold text-white hover:bg-[#0e4388] disabled:cursor-not-allowed disabled:bg-[#86a7d5] max-[1024px]:py-2 max-[1024px]:text-[9px]"
               >
                 <span className="material-symbols-outlined text-[18px]">
                   check
                 </span>
-                Confirm assignment
+                {confirmedAssignments.has(selectedJob[3]) ? "Open field report" : "Confirm assignment"}
               </button>
             </aside>
           </div>
@@ -595,68 +686,110 @@ function Scheduling() {
 
       </section>
 
-      {isShortageOptionsOpen && (
+      {isEditJobOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#071426]/60 p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#071426]/75 p-4 backdrop-blur-[2px]"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setIsShortageOptionsOpen(false);
-            }
+            if (event.target === event.currentTarget) setIsEditJobOpen(false);
           }}
         >
-          <section
-            role="dialog"
-            className="w-full max-w-[440px] rounded-[10px] border border-[#dfe6ec] bg-white p-5 text-[#174f9a] shadow-[0_16px_48px_rgb(7_20_38_/_30%)]"
-          >
+          <section role="dialog" aria-labelledby="edit-job-title" className="w-full max-w-[560px] rounded-[14px] border border-[#263c5a] bg-[#172a44] p-6 text-[#e5edf8] shadow-[0_24px_80px_rgb(0_0_0_/_45%)]">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="m-0 text-[10px] font-bold uppercase tracking-[.08em] text-[#87929c]">
-                  WO-88431 · DMP-145
-                </p>
-                <h2
-                  id="shortage-options-title"
-                  className="m-0 mt-1 text-[20px] font-bold"
-                >
-                  Resolve stock shortage
-                </h2>
-                <p className="m-0 mt-2 text-[12px] text-[#718090]">
-                  Choose how to resolve the 2-unit shortage for Makati.
-                </p>
+                <p className="m-0 text-[11px] font-semibold uppercase tracking-[.1em] text-[#91a8c7]">{editValues.order}</p>
+                <h2 id="edit-job-title" className="m-0 mt-1 text-[23px] font-bold text-white">Edit scheduled job</h2>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsShortageOptionsOpen(false)}
-                className="text-[24px] leading-none text-[#718090] hover:text-[#174f9a]"
-              >
-                ×
-              </button>
+              <button type="button" onClick={() => setIsEditJobOpen(false)} className="grid h-8 w-8 place-items-center text-[25px] text-[#91a8c7] hover:text-white">×</button>
             </div>
-            <div className="mt-5 grid gap-3">
-              <button
-                type="button"
-                onClick={() =>
-                  handleShortageResolution("Requisition stock to Makati")
-                }
-                className="rounded-[6px] border border-[#dfe6ec] p-3 text-left hover:border-[#1250a0] hover:bg-[#f5f9ff]"
-              >
-                <strong className="block text-[13px]">
-                  Requisition stock to Makati
-                </strong>
-                <span className="mt-1 block text-[11px] text-[#718090]">
-                  Request 2 units of DMP-145 from a neighboring branch.
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => handleShortageResolution("Swap branch")}
-                className="rounded-[6px] border border-[#dfe6ec] p-3 text-left hover:border-[#1250a0] hover:bg-[#f5f9ff]"
-              >
-                <strong className="block text-[13px]">Swap branch</strong>
-                <span className="mt-1 block text-[11px] text-[#718090]">
-                  Reassign this work order to a branch with available stock.
-                </span>
-              </button>
-            </div>
+            <form className="mt-5 grid gap-4" onSubmit={handleEditJob}>
+              <input type="hidden" name="order" value={editValues.order || ""} readOnly />
+              <label className="text-[13px] font-medium text-[#a9bfd9]">
+                Service type
+                <select name="serviceType" value={editValues.serviceType || ""} onChange={(event) => setEditValues((current) => ({ ...current, serviceType: event.target.value }))} className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]">
+                  <option>Service call</option>
+                  <option>Preventive maintenance</option>
+                  <option>Installation</option>
+                </select>
+              </label>
+              <div className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
+                <label className="text-[13px] font-medium text-[#a9bfd9]">
+                  Date
+                  <input required type="date" name="date" value={editValues.date || ""} onChange={(event) => setEditValues((current) => ({ ...current, date: event.target.value }))} className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]" />
+                </label>
+                <label className="text-[13px] font-medium text-[#a9bfd9]">
+                  Branch
+                  <select name="branch" value={editValues.branch || defaultBranch} onChange={(event) => setEditValues((current) => ({ ...current, branch: event.target.value }))} className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]">
+                    <option>Makati</option>
+                    <option>Cebu</option>
+                  </select>
+                </label>
+              </div>
+              <div className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
+                <label className="text-[13px] font-medium text-[#a9bfd9]">
+                  Start time
+                  <input required type="time" name="startTime" value={editValues.startTime || ""} onChange={(event) => setEditValues((current) => ({ ...current, startTime: event.target.value }))} className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]" />
+                </label>
+                <label className="text-[13px] font-medium text-[#a9bfd9]">
+                  End time
+                  <input required type="time" name="endTime" value={editValues.endTime || ""} onChange={(event) => setEditValues((current) => ({ ...current, endTime: event.target.value }))} className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]" />
+                </label>
+              </div>
+              <fieldset className="border-0 p-0">
+                <div className="flex items-center justify-between gap-3">
+                  <legend className="text-[13px] font-medium text-[#a9bfd9]">Assign technicians</legend>
+                  <button
+                    type="button"
+                    onClick={() => setEditTechnicians((current) => [...current, ""])}
+                    className="rounded-[6px] border border-[#4d88e8] px-3 py-2 text-[11px] font-semibold text-[#9fc4ff] hover:bg-[#1d3351]"
+                  >
+                    + Add technician
+                  </button>
+                </div>
+                <div className="mt-2 grid gap-2">
+                  {editTechnicians.map((technicianId, index) => {
+                    const assignedTechnician = selectedJob[8]?.find((technician) => technician.id === technicianId);
+                    const options = [
+                      ...editTechnicianOptions,
+                      ...(assignedTechnician && !editTechnicianOptions.some((option) => option.id === technicianId)
+                        ? [{ ...assignedTechnician, unavailable: true }]
+                        : []),
+                    ];
+                    return (
+                      <div className="flex items-center gap-2" key={`edit-technician-${index}`}>
+                        <select
+                          name="technicians"
+                          value={technicianId}
+                          onChange={(event) => setEditTechnicians((current) => current.map((value, currentIndex) => currentIndex === index ? event.target.value : value))}
+                          className="h-11 min-w-0 flex-1 rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
+                        >
+                          <option value="">Select a technician</option>
+                          {options.map((option) => (
+                            <option key={option.id} value={option.id} disabled={option.unavailable}>
+                              {option.name}{option.unavailable ? " (unavailable on this date)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                        {editTechnicians.length > 1 && (
+                          <button
+                            type="button"
+                            aria-label={`Remove technician ${index + 1}`}
+                            onClick={() => setEditTechnicians((current) => current.filter((_, currentIndex) => currentIndex !== index))}
+                            className="grid h-10 w-10 flex-none place-items-center rounded-[6px] text-[#91a8c7] hover:bg-[#1d3351] hover:text-white"
+                          >
+                            <span className="material-symbols-outlined text-[20px]">delete</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </fieldset>
+              {formError && <p className="m-0 rounded-[6px] border border-[#8f3e3a] bg-[#3c2229] px-3 py-2 text-[12px] text-[#ffb3a8]" role="alert">{formError}</p>}
+              <div className="flex justify-end gap-3 border-t border-[#293d58] pt-4">
+                <button type="button" onClick={() => setIsEditJobOpen(false)} className="rounded-[8px] border border-[#293f5d] px-4 py-2 text-[13px] text-[#e5edf8] hover:bg-[#1d3351]">Cancel</button>
+                <button type="submit" disabled={isSaving} className="rounded-[8px] bg-[#4d88e8] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#5b96f4]">{isSaving ? "Saving..." : "Save changes"}</button>
+              </div>
+            </form>
           </section>
         </div>
       )}
@@ -699,10 +832,7 @@ function Scheduling() {
             <form
               id="create-job-form"
               className="min-h-0 flex-1 overflow-y-auto px-7 py-5 max-[620px]:px-5"
-              onSubmit={(event) => {
-                event.preventDefault();
-                setIsCreateJobOpen(false);
-              }}
+              onSubmit={handleCreateJob}
             >
               <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
                 <label className="text-[14px] font-medium text-[#a9bfd9]">
@@ -790,6 +920,7 @@ function Scheduling() {
                 <label className="col-span-2 text-[14px] font-medium text-[#a9bfd9] max-[620px]:col-span-1">
                   Service type <span className="text-[#ff6557]">*</span>
                   <select
+                    name="serviceType"
                     defaultValue="Service call"
                     className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
                   >
@@ -818,9 +949,35 @@ function Scheduling() {
                   <input
                     required
                     type="time"
+                    name="startTime"
                     defaultValue="09:00"
                     className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
                   />
+                </label>
+              </div>
+
+              <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
+                <label className="text-[14px] font-medium text-[#a9bfd9]">
+                  End time <span className="text-[#ff6557]">*</span>
+                  <input
+                    required
+                    type="time"
+                    name="endTime"
+                    defaultValue="10:00"
+                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
+                  />
+                </label>
+                <label className="text-[14px] font-medium text-[#a9bfd9]">
+                  Branch <span className="text-[#ff6557]">*</span>
+                  <select
+                    required
+                    name="branch"
+                    defaultValue={defaultBranch}
+                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
+                  >
+                    <option>Makati</option>
+                    <option>Cebu</option>
+                  </select>
                 </label>
               </div>
 
@@ -837,6 +994,7 @@ function Scheduling() {
                     + Add technician
                   </button>
                 </div>
+
                 <div className="mt-2 grid gap-2">
                   {technicians.map((technician, index) => (
                     <div className="flex items-center gap-2" key={`technician-${index}`}>
@@ -854,8 +1012,8 @@ function Scheduling() {
                       >
                         <option value="">Select a technician</option>
                         {technicianOptions.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
+                          <option key={option.id} value={option.id}>
+                            {option.name}
                           </option>
                         ))}
                       </select>
@@ -879,9 +1037,16 @@ function Scheduling() {
                   ))}
                 </div>
               </fieldset>
+              {formError && (
+                <p className="mb-5 mt-3 rounded-[6px] border border-[#8f3e3a] bg-[#3c2229] px-3 py-2 text-[12px] text-[#ffb3a8]" role="alert">
+                  {formError}
+                </p>
+              )}
               <p className="mb-5 mt-2 flex items-center gap-2 text-[14px] text-[#27a567]">
                 <span className="h-2.5 w-2.5 rounded-full bg-[#27a567]" />
-                No conflicts on selected date and time
+                {technicianOptions.length
+                  ? `${technicianOptions.length} technician${technicianOptions.length === 1 ? "" : "s"} available on this date`
+                  : "No technicians available on this date"}
               </p>
 
               <label className="mt-4 block text-[14px] font-medium text-[#a9bfd9]">
@@ -896,7 +1061,7 @@ function Scheduling() {
 
             <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-[#293d58] bg-[#172a44] px-7 py-4 max-[620px]:flex-col max-[620px]:items-stretch max-[620px]:px-5">
               <span className="text-[14px] text-[#91a8c7]">
-                Work order no. WO-88435 (auto)
+                Work order number generated on save
               </span>
               <div className="flex gap-3 max-[420px]:flex-wrap">
                 <button
@@ -916,9 +1081,10 @@ function Scheduling() {
                 <button
                   type="submit"
                   form="create-job-form"
+                  disabled={isSaving}
                   className="h-[50px] rounded-[10px] bg-[#4d88e8] px-5 text-[14px] font-semibold text-white hover:bg-[#5b96f4] max-[420px]:flex-1"
                 >
-                  Create job with shortage
+                  {isSaving ? "Saving..." : "Create job"}
                 </button>
               </div>
             </footer>
