@@ -1,97 +1,69 @@
 import { useState, useRef, useEffect } from "react";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
+import { callAuthFunction } from "../lib/auth.js";
 
-const inventoryItems = [
-  [
-    "inventory_2",
-    "12V 7Ah Backup Battery",
-    "BAT-012",
-    "14",
-    "8",
-    "Makati",
-    "rm823 8 floor",
-    "₱1,200",
-    "₱16,800",
-    "Power",
-    "In stock",
-  ],
-  [
-    "deployed_code",
-    "PIR Motion Detector",
-    "DMP-145",
-    "8",
-    "10",
-    "Makati",
-    "rm823 8 floor",
-    "₱850",
-    "₱6,800",
-    "Intrusion",
-    "Low stock",
-    true,
-  ],
-  [
-    "inventory_2",
-    "Proximity Card Reader",
-    "RDR-220",
-    "6",
-    "4",
-    "Makati",
-    "rm823 8 floor",
-    "₱2,400",
-    "₱14,400",
-    "Access",
-    "In stock",
-  ],
-  [
-    "deployed_code",
-    "Surveillance HDD 4TB",
-    "HDD-008",
-    "2",
-    "3",
-    "Cebu",
-    "rm823 8 floor",
-    "₱8,500",
-    "₱17,000",
-    "CCTV",
-    "Low stock",
-    true,
-  ],
-  [
-    "inventory_2",
-    "Surface Door Contact",
-    "CNT-204",
-    "23",
-    "12",
-    "Makati",
-    "rm823 8 floor",
-    "₱420",
-    "₱9,660",
-    "Intrusion",
-    "In stock",
-  ],
-];
+function formatCurrency(value) {
+  return `₱${Number(value || 0).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
 
-const metricCards = [
-  ["inventory_2", "Total tracked items", "1,284", "Across 2 branches"],
-  ["warning", "Below reorder point", "03", "Requires procurement", true],
-  ["local_shipping", "In transit", "128", "Expected by 22 Apr"],
-];
+function mapInventoryRecord(row) {
+  const part = row.parts;
+  const quantity = Number(row.quantity_on_hand) || 0;
+  const minimum = Number(part.reorder_threshold) || 0;
+  const unitPrice = Number(part.unit_cost) || 0;
+  const statusName = quantity <= minimum ? "Low stock" : "In stock";
+  const icon = part.category === "Intrusion" ? "deployed_code" : "inventory_2";
+
+  return [
+    icon,
+    part.name,
+    part.sku,
+    String(quantity),
+    String(minimum),
+    row.branch.replace(/^./, (letter) => letter.toUpperCase()),
+    part.address || "—",
+    formatCurrency(unitPrice),
+    formatCurrency(unitPrice * quantity),
+    part.category || "Uncategorized",
+    statusName,
+    statusName === "Low stock",
+    row.stock_id,
+    row.part_id,
+    part.unit_of_measure,
+    part.notes || "",
+  ];
+}
+
+async function fetchInventoryRecords() {
+  const result = await callAuthFunction("list-inventory");
+  return (result.items || []).map(mapInventoryRecord);
+}
 
 const branchOptions = ["All branches", "Makati", "Cebu"];
 const categoryOptions = ["All categories", "Power", "Intrusion", "Access", "CCTV"];
 
 function Inventory() {
-  const [inventoryRecords, setInventoryRecords] = useState(inventoryItems);
+  const [inventoryRecords, setInventoryRecords] = useState([]);
+  const [isLoadingInventory, setIsLoadingInventory] = useState(true);
+  const [inventoryError, setInventoryError] = useState("");
   const [isCreateRequisition, setIsCreateRequisition] = useState(false);
   const [isAddNewItem, setIsAddNewItem] = useState(false);
+  const [isEditItem, setIsEditItem] = useState(false);
+  const [isSavingItem, setIsSavingItem] = useState(false);
+  const [isAdjustingStock, setIsAdjustingStock] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [selectedItemCode, setSelectedItemCode] = useState(null);
   const [stockAdjustment, setStockAdjustment] = useState("");
   const [isLedgerMaximized, setIsLedgerMaximized] = useState(false);
-  const [priority, setPriority] = useState("Normal");
   const [status, setStatus] = useState("In stock");
   const [newItemQuantity, setNewItemQuantity] = useState("");
   const [newItemUnitPrice, setNewItemUnitPrice] = useState("");
+  const [requisitionReference] = useState(() => Math.floor(10000 + Math.random() * 90000));
 
   // Branch dropdown & filtering state
   const [selectedBranch, setSelectedBranch] = useState("All branches");
@@ -100,6 +72,23 @@ function Inventory() {
   const [selectedCategory, setSelectedCategory] = useState("All categories");
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const categoryDropdownRef = useRef(null);
+
+  useEffect(() => {
+    let isCurrent = true;
+    fetchInventoryRecords()
+      .then((records) => {
+        if (isCurrent) setInventoryRecords(records);
+      })
+      .catch((error) => {
+        if (isCurrent) setInventoryError(error.message);
+      })
+      .finally(() => {
+        if (isCurrent) setIsLoadingInventory(false);
+      });
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
 
   // Close branch dropdown on outside click
   useEffect(() => {
@@ -118,10 +107,9 @@ function Inventory() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Filter inventory items based on selected branch
   const filteredInventoryItems = inventoryRecords.filter((item) => {
-    const itemBranch = item[5]; // Index 5 holds branch name
-    const itemCategory = item[9]; // Index 9 holds category
+    const itemBranch = item[5];
+    const itemCategory = item[9];
     const matchesBranch =
       selectedBranch === "All branches" ||
       itemBranch.toLowerCase() === selectedBranch.toLowerCase();
@@ -134,35 +122,76 @@ function Inventory() {
   const newItemTotalCost =
     (Number(newItemQuantity) || 0) * (Number(newItemUnitPrice) || 0);
   const selectedInventoryItem = inventoryRecords.find(
-    (item) => item[2] === selectedItemCode,
+    (item) => item[12] === selectedItemCode,
   );
 
-  function handleStockAdjustment(direction) {
+  const metricCards = [
+    ["inventory_2", "Total tracked items", inventoryRecords.length.toLocaleString(), `Across ${new Set(inventoryRecords.map((item) => item[5])).size} branches`],
+    ["warning", "Below reorder point", String(inventoryRecords.filter((item) => item[11]).length).padStart(2, "0"), "Requires procurement", true],
+    ["local_shipping", "In transit", "—", "No incoming stock tracked"],
+  ];
+
+  async function handleStockAdjustment(direction) {
     const quantity = Number(stockAdjustment);
     if (!selectedItemCode || !Number.isInteger(quantity) || quantity <= 0) {
       return;
     }
 
-    setInventoryRecords((currentRecords) =>
-      currentRecords.map((item) => {
-        if (item[2] !== selectedItemCode) return item;
+    setActionError("");
+    setIsAdjustingStock(true);
+    try {
+      await callAuthFunction("adjust-inventory-stock", {
+        stockId: selectedItemCode,
+        direction: direction === "add" ? "in" : "out",
+        quantity,
+      });
+      setInventoryRecords(await fetchInventoryRecords());
+      setStockAdjustment("");
+    } catch (error) {
+      setActionError(error.message);
+    } finally {
+      setIsAdjustingStock(false);
+    }
+  }
 
-        const currentQuantity = Number(item[3]) || 0;
-        const nextQuantity =
-          direction === "add"
-            ? currentQuantity + quantity
-            : Math.max(0, currentQuantity - quantity);
-        const unitPrice = Number(String(item[7]).replace(/[^0-9.]/g, ""));
-        const nextStatus = nextQuantity <= Number(item[4]) ? "Low stock" : "In stock";
-        const updatedItem = [...item];
-        updatedItem[3] = String(nextQuantity);
-        updatedItem[8] = `₱${(unitPrice * nextQuantity).toLocaleString("en-PH")}`;
-        updatedItem[10] = nextStatus;
-        updatedItem[11] = nextStatus === "Low stock";
-        return updatedItem;
-      }),
-    );
-    setStockAdjustment("");
+  async function handleSaveInventoryItem(event) {
+    event.preventDefault();
+    setFormError("");
+    setIsSavingItem(true);
+    const formData = Object.fromEntries(new FormData(event.currentTarget));
+    const item = {
+      name: formData.partName,
+      sku: formData.sku,
+      quantity: Number(formData.quantity),
+      reorderThreshold: Number(formData.minimumStock),
+      branch: formData.branch,
+      address: formData.address,
+      unitCost: Number(formData.unitPrice),
+      unitOfMeasure: formData.unitOfMeasure,
+      category: formData.category,
+      notes: formData.notes,
+    };
+
+    try {
+      if (isEditItem) {
+        await callAuthFunction("update-inventory-item", {
+          stockId: selectedInventoryItem[12],
+          partId: selectedInventoryItem[13],
+          item,
+        });
+      } else {
+        await callAuthFunction("create-inventory-item", { item });
+      }
+      setInventoryRecords(await fetchInventoryRecords());
+      setNewItemQuantity("");
+      setNewItemUnitPrice("");
+      setIsAddNewItem(false);
+      setIsEditItem(false);
+    } catch (error) {
+      setFormError(error.message);
+    } finally {
+      setIsSavingItem(false);
+    }
   }
 
   return (
@@ -186,7 +215,13 @@ function Inventory() {
             <div className="flex items-center gap-3 max-[620px]:gap-2">
               <button
                 type="button"
-                onClick={() => setIsAddNewItem(true)}
+                onClick={() => {
+                  setFormError("");
+                  setNewItemQuantity("");
+                  setNewItemUnitPrice("");
+                  setIsEditItem(false);
+                  setIsAddNewItem(true);
+                }}
                 className="rounded-[6px] border border-[#1250a0] bg-white px-5 py-3 text-[12px] font-bold text-[#1250a0] shadow-[0_2px_4px_rgb(18_80_160_/_12%)] hover:bg-[#f3f8ff] max-[1024px]:px-4 max-[1024px]:py-2 max-[620px]:text-[9px]"
               >
                 + Add New Item
@@ -371,9 +406,19 @@ function Inventory() {
               <span>Action</span>
             </div>
 
-            {filteredInventoryItems.length === 0 ? (
+            {inventoryError && (
+              <p className="m-0 border-b border-[#f1b7af] bg-[#fff3f1] px-7 py-3 text-[12px] text-[#a83a2c]" role="alert">
+                {inventoryError}
+              </p>
+            )}
+
+            {isLoadingInventory ? (
               <div className="py-12 text-center text-[13px] text-[#8e959b]">
-                No inventory items found for <strong>{selectedBranch}</strong> and <strong>{selectedCategory}</strong>.
+                Loading inventory...
+              </div>
+            ) : filteredInventoryItems.length === 0 ? (
+              <div className="py-12 text-center text-[13px] text-[#8e959b]">
+                {inventoryError ? "Inventory could not be loaded." : <>No inventory items found for <strong>{selectedBranch}</strong> and <strong>{selectedCategory}</strong>.</>}
               </div>
             ) : (
               filteredInventoryItems.map(
@@ -390,12 +435,13 @@ function Inventory() {
                   category,
                   statusName,
                   alert,
+                  stockId,
                 ]) => (
                   <div
                     className={`grid min-h-[64px] grid-cols-[2fr_.8fr_.9fr_1.25fr_1fr_1fr_1fr_1fr_90px] items-center border-t border-[#e4e8eb] px-7 text-[11px] max-[1100px]:grid-cols-[2fr_1fr_1fr_1fr_1fr_90px] max-[1100px]:[&>*:nth-child(4)]:hidden max-[1100px]:[&>*:nth-child(5)]:hidden max-[1100px]:[&>*:nth-child(6)]:hidden max-[850px]:grid-cols-[2fr_1fr_1fr_1fr_90px] max-[850px]:[&>*:nth-child(7)]:hidden max-[850px]:px-4 max-[620px]:min-h-[62px] max-[620px]:grid-cols-[1fr_auto] max-[620px]:gap-x-2 max-[620px]:gap-y-1 max-[620px]:px-3 max-[620px]:py-2 ${
                       alert ? "bg-[#fff3f1]" : "bg-white"
                     }`}
-                    key={code}
+                    key={stockId}
                   >
                     <div className="flex min-w-0 items-center gap-4 max-[620px]:col-start-1 max-[620px]:row-span-2 max-[620px]:gap-2">
                       <span
@@ -445,8 +491,9 @@ function Inventory() {
                     <button
                       type="button"
                       onClick={() => {
-                        setSelectedItemCode(code);
+                        setSelectedItemCode(stockId);
                         setStockAdjustment("");
+                        setActionError("");
                       }}
                       className="text-right text-[10px] font-bold text-[#7573bd] hover:text-[#1250a0] max-[620px]:col-start-2 max-[620px]:row-start-3"
                     >
@@ -525,6 +572,9 @@ function Inventory() {
                       <span className="block text-[11px] text-[#91a8c7]">Current stock</span>
                       <strong className="mt-1 block text-[25px] text-white">
                         {selectedInventoryItem[3]}
+                        <span className="ml-1 text-[12px] font-normal text-[#91a8c7]">
+                          {selectedInventoryItem[14]}
+                        </span>
                         <span className="ml-2 text-[12px] font-normal text-[#91a8c7]">
                           / minimum {selectedInventoryItem[4]}
                         </span>
@@ -548,7 +598,6 @@ function Inventory() {
                     <input
                       type="number"
                       min="1"
-                      max={selectedInventoryItem[3]}
                       value={stockAdjustment}
                       onChange={(event) => setStockAdjustment(event.target.value)}
                       placeholder="Enter quantity"
@@ -559,10 +608,10 @@ function Inventory() {
                     <button
                       type="button"
                       onClick={() => handleStockAdjustment("add")}
-                      disabled={!stockAdjustment || Number(stockAdjustment) <= 0}
+                      disabled={!stockAdjustment || Number(stockAdjustment) <= 0 || isAdjustingStock}
                       className="h-11 rounded-[8px] bg-[#4d88e8] text-[13px] font-semibold text-white hover:bg-[#5b96f4] disabled:cursor-not-allowed disabled:opacity-45"
                     >
-                      + Add stock
+                      {isAdjustingStock ? "Saving..." : "+ Add stock"}
                     </button>
                     <button
                       type="button"
@@ -570,17 +619,35 @@ function Inventory() {
                       disabled={
                         !stockAdjustment ||
                         Number(stockAdjustment) <= 0 ||
-                        Number(stockAdjustment) > Number(selectedInventoryItem[3])
+                        Number(stockAdjustment) > Number(selectedInventoryItem[3]) ||
+                        isAdjustingStock
                       }
                       className="h-11 rounded-[8px] border border-[#ff8f7c] text-[13px] font-semibold text-[#ffad9f] hover:bg-[#3a2b35] disabled:cursor-not-allowed disabled:opacity-45"
                     >
                       - Remove stock
                     </button>
                   </div>
+                  {actionError && (
+                    <p className="mt-3 text-[12px] text-[#ffad9f]" role="alert">
+                      {actionError}
+                    </p>
+                  )}
                 </div>
               </div>
 
-              <footer className="flex justify-end border-t border-[#293d58] px-7 py-4 max-[620px]:px-5">
+              <footer className="flex justify-between border-t border-[#293d58] px-7 py-4 max-[620px]:px-5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFormError("");
+                    setNewItemQuantity(selectedInventoryItem[3]);
+                    setNewItemUnitPrice(String(Number(selectedInventoryItem[7].replace(/[^0-9.]/g, ""))));
+                    setIsEditItem(true);
+                  }}
+                  className="h-11 rounded-[8px] border border-[#4d88e8] px-5 text-[13px] font-semibold text-[#bcd4fa] hover:bg-[#1d3351]"
+                >
+                  Edit details
+                </button>
                 <button
                   type="button"
                   onClick={() => setSelectedItemCode(null)}
@@ -593,11 +660,14 @@ function Inventory() {
           </div>
         )}
 
-        {isAddNewItem && (
+        {(isAddNewItem || isEditItem) && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-[#071426]/75 p-4 backdrop-blur-[2px] max-[620px]:items-end max-[620px]:p-0"
             onMouseDown={(event) => {
-              if (event.target === event.currentTarget) setIsAddNewItem(false);
+              if (event.target === event.currentTarget) {
+                setIsAddNewItem(false);
+                setIsEditItem(false);
+              }
             }}
           >
             <section
@@ -614,7 +684,7 @@ function Inventory() {
                     id="add-new-item-title"
                     className="m-0 mt-1 text-[27px] font-bold text-[white] max-[620px]:text-[23px]"
                   >
-                    Add New Item
+                    {isEditItem ? "Edit Item Details" : "Add New Item"}
                   </h2>
                   <p className="m-0 mt-1 text-[15px] text-[#99afc9]">
                     Add a new part or equipment item to the stock ledger.
@@ -622,7 +692,10 @@ function Inventory() {
                 </div>
                 <button
                   type="button"
-                  onClick={() => setIsAddNewItem(false)}
+                  onClick={() => {
+                    setIsAddNewItem(false);
+                    setIsEditItem(false);
+                  }}
                   className="grid h-8 w-8 place-items-center text-[27px] leading-none text-[#91a8c7] hover:text-white"
                 >
                   ×
@@ -631,19 +704,28 @@ function Inventory() {
 
               <form
                 id="add-new-item-form"
+                key={isEditItem ? selectedItemCode : "new-item"}
                 className="min-h-0 flex-1 overflow-y-auto px-7 py-5 max-[620px]:px-5"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  setIsAddNewItem(false);
-                }}
+                onSubmit={handleSaveInventoryItem}
               >
                 <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
-                  <label className="col-span-2 text-[14px] font-medium text-[#a9bfd9] max-[620px]:col-span-1">
+                  <label className="text-[14px] font-medium text-[#a9bfd9]">
+                    Item Code <span className="text-[#ff6557]">*</span>
+                    <input
+                      required
+                      name="sku"
+                      defaultValue={isEditItem ? selectedInventoryItem[2] : ""}
+                      placeholder="e.g. DMP-145"
+                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                    />
+                  </label>
+                  <label className="text-[14px] font-medium text-[#a9bfd9]">
                     Part Name <span className="text-[#ff6557]">*</span>
                     <input
                       required
                       autoFocus
                       name="partName"
+                      defaultValue={isEditItem ? selectedInventoryItem[1] : ""}
                       placeholder="e.g. PIR Motion Detector"
                       className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
                     />
@@ -660,6 +742,7 @@ function Inventory() {
                       name="quantity"
                       value={newItemQuantity}
                       onChange={(event) => setNewItemQuantity(event.target.value)}
+                      readOnly={isEditItem}
                       placeholder="e.g. 8"
                       className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
                     />
@@ -671,6 +754,7 @@ function Inventory() {
                       type="number"
                       min="0"
                       name="minimumStock"
+                      defaultValue={isEditItem ? selectedInventoryItem[4] : ""}
                       placeholder="e.g. 10"
                       className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
                     />
@@ -683,7 +767,7 @@ function Inventory() {
                     <select
                       required
                       name="branch"
-                      defaultValue="Makati"
+                      defaultValue={isEditItem ? selectedInventoryItem[5] : "Makati"}
                       className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
                     >
                       <option>Makati</option>
@@ -695,6 +779,7 @@ function Inventory() {
                     <input
                       required
                       name="address"
+                      defaultValue={isEditItem ? selectedInventoryItem[6] : ""}
                       placeholder="e.g. Room 823, 8th Floor"
                       className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
                     />
@@ -719,21 +804,18 @@ function Inventory() {
                   <div className="flex flex-col justify-end text-[14px] font-medium text-[#a9bfd9]">
                     <span>Calculated Total Cost</span>
                     <output className="mt-1.5 flex h-12 items-center rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] font-semibold text-white">
-                      ₱{newItemTotalCost.toLocaleString("en-PH", {
-                        minimumFractionDigits: 2,
-                        maximumFractionDigits: 2,
-                      })}
+                      {formatCurrency(newItemTotalCost)}
                     </output>
                   </div>
                 </div>
 
                 <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
-                  <label className="col-span-2 text-[14px] font-medium text-[#a9bfd9] max-[620px]:col-span-1">
+                  <label className="text-[14px] font-medium text-[#a9bfd9]">
                     Category <span className="text-[#ff6557]">*</span>
                     <select
                       required
                       name="category"
-                      defaultValue="Intrusion"
+                      defaultValue={isEditItem ? selectedInventoryItem[9] : "Intrusion"}
                       className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
                     >
                       <option>Power</option>
@@ -742,6 +824,16 @@ function Inventory() {
                       <option>CCTV</option>
                     </select>
                   </label>
+                  <label className="text-[14px] font-medium text-[#a9bfd9]">
+                    Unit of Measure <span className="text-[#ff6557]">*</span>
+                    <input
+                      required
+                      name="unitOfMeasure"
+                      defaultValue={isEditItem ? selectedInventoryItem[14] : "pcs"}
+                      placeholder="e.g. pcs, box, roll"
+                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                    />
+                  </label>
                 </div>
 
                 <label className="mt-4 block text-[14px] font-medium text-[#a9bfd9]">
@@ -749,20 +841,29 @@ function Inventory() {
                   <textarea
                     name="notes"
                     rows="3"
+                    defaultValue={isEditItem ? selectedInventoryItem[15] : ""}
                     placeholder="Add supplier information, specifications, or notes..."
                     className="mt-1.5 w-full resize-y rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 py-3 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
                   />
                 </label>
+                {formError && (
+                  <p className="mt-3 text-[12px] text-[#ffad9f]" role="alert">
+                    {formError}
+                  </p>
+                )}
               </form>
 
               <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-[#293d58] bg-[#172a44] px-7 py-4 max-[620px]:flex-col max-[620px]:items-stretch max-[620px]:px-5">
                 <span className="text-[14px] text-[#91a8c7]">
-                  Inventory item details
+                  {isEditItem ? "Update inventory item details" : "Inventory item details"}
                 </span>
                 <div className="flex gap-3 max-[420px]:flex-wrap">
                   <button
                     type="button"
-                    onClick={() => setIsAddNewItem(false)}
+                    onClick={() => {
+                      setIsAddNewItem(false);
+                      setIsEditItem(false);
+                    }}
                     className="h-[50px] rounded-[10px] border border-[#293f5d] px-5 text-[14px] text-[#e5edf8] hover:bg-[#1d3351]"
                   >
                     Cancel
@@ -770,9 +871,10 @@ function Inventory() {
                   <button
                     type="submit"
                     form="add-new-item-form"
+                    disabled={isSavingItem}
                     className="h-[50px] rounded-[10px] bg-[#4d88e8] px-5 text-[14px] font-semibold text-white hover:bg-[#5b96f4] max-[420px]:flex-1"
                   >
-                    Add New Item
+                    {isSavingItem ? "Saving..." : isEditItem ? "Save Changes" : "Add New Item"}
                   </button>
                 </div>
               </footer>
@@ -929,7 +1031,7 @@ function Inventory() {
               <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-[#293d58] bg-[#172a44] px-7 py-4 max-[620px]:flex-col max-[620px]:items-stretch max-[620px]:px-5">
                 <span className="text-[14px] text-[#91a8c7]">
                   Requisition Ref: REQ-
-                  {Math.floor(10000 + Math.random() * 90000)}
+                  {requisitionReference}
                 </span>
                 <div className="flex gap-3 max-[420px]:flex-wrap">
                   <button

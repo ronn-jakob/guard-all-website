@@ -15,6 +15,7 @@ function Account() {
   const [searchTerm, setSearchTerm] = useState("");
   const [formError, setFormError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
+  const [deletingAccountId, setDeletingAccountId] = useState(null);
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
   const [resetRequest, setResetRequest] = useState(() => {
     const storedRequest = localStorage.getItem("passwordResetRequest");
@@ -83,6 +84,22 @@ function Account() {
     } catch (error) {
       setFormError(error.message);
       setSuccessMessage("");
+    }
+  };
+
+  const handleDeleteAccount = async (account) => {
+    if (!window.confirm(`Remove ${account.name} from the active user directory?`)) return;
+    setDeletingAccountId(account.id);
+    setFormError("");
+    setSuccessMessage("");
+    try {
+      await callAuthFunction("delete-user", { userId: account.id });
+      setAccounts((currentAccounts) => currentAccounts.filter((currentAccount) => currentAccount.id !== account.id));
+      setSuccessMessage(`${account.name} was removed from the user directory.`);
+    } catch (error) {
+      setFormError(error.message);
+    } finally {
+      setDeletingAccountId(null);
     }
   };
 
@@ -375,7 +392,7 @@ function Account() {
                 <div className="divide-y divide-[#e8edf1]">
                   {filteredAccounts.map((account) => (
                     <article
-                      className="grid grid-cols-[minmax(0,1.5fr)_minmax(110px,0.8fr)_90px] items-center gap-4 px-6 py-4 max-[620px]:grid-cols-[minmax(0,1fr)_auto] max-[620px]:gap-2 max-[620px]:px-4"
+                      className="grid grid-cols-[minmax(0,1.5fr)_minmax(110px,0.8fr)_auto_110px] items-center gap-4 px-6 py-4 max-[620px]:grid-cols-[minmax(0,1fr)_auto] max-[620px]:gap-2 max-[620px]:px-4"
                       key={account.id}
                     >
                       <div className="flex min-w-0 items-center gap-3">
@@ -407,6 +424,16 @@ function Account() {
                       <span className="justify-self-end rounded-full border border-[#b9e3c4] bg-[#effaf2] px-2.5 py-1 text-[10px] font-bold text-[#267340]">
                         {account.status}
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteAccount(account)}
+                        disabled={deletingAccountId === account.id}
+                        className="inline-flex items-center justify-center gap-1 rounded-[6px] border border-[#f0b8b0] bg-[#fff7f5] px-2.5 py-1.5 text-[10px] font-bold text-[#b64132] transition-colors hover:bg-[#fff0ec] disabled:cursor-wait disabled:opacity-60 max-[620px]:col-start-2 max-[620px]:row-start-2"
+                        title="Remove user"
+                      >
+                        <span className="material-symbols-outlined text-[15px]">person_remove</span>
+                        {deletingAccountId === account.id ? "Removing..." : "Remove"}
+                      </button>
                     </article>
                   ))}
                 </div>
