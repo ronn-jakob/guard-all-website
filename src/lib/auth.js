@@ -11,10 +11,7 @@ export const roleAccess = {
 
 export async function callAuthFunction(action, payload = {}) {
   const token = sessionStorage.getItem("authToken");
-  const functionName = ["create-account", "change-password"].includes(action)
-    ? "guard-account"
-    : "guard-auth";
-  const { data, error } = await supabase.functions.invoke(functionName, {
+  const { data, error } = await supabase.functions.invoke("guard-auth", {
     body: { action, ...payload },
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });

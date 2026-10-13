@@ -43,7 +43,7 @@ function Sidebar() {
       window.removeEventListener("profile-updated", handleProfileUpdate);
       window.removeEventListener("account-updated", handleAccountUpdate);
     };
-  }, [profilePhotoKey]);
+  }, []);
 
   const navigation = [
     ...primaryNavigation,

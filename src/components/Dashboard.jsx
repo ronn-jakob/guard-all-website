@@ -2,8 +2,84 @@ import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { getSession } from "../lib/auth.js";
 
-const metrics = [];
-const jobs = [];
+const metrics = [
+  [
+    "calendar_month",
+    "Scheduled jobs",
+    "7",
+    "2 jobs scheduled today",
+    "bg-[#d6e6fb] text-[#1954a0]",
+  ],
+  [
+    "warning",
+    "Low-stocks alert",
+    "3",
+    "Makati only",
+    "bg-[#ffd5cc] text-[#ff725f]",
+    true,
+  ],
+  [
+    "assignment",
+    "Pending reports",
+    "4",
+    "1 requires review",
+    "bg-[#d6e6fb] text-[#1954a0]",
+  ],
+  [
+    "sell",
+    "Revenue this month",
+    "₱775k",
+    "+1.2% from last month",
+    "bg-[#d6e6fb] text-[#1954a0]",
+  ],
+];
+
+const jobs = [
+  [
+    "09:00",
+    "TODAY",
+    "WO-91283",
+    "HarborBridge Gateway",
+    "Pasay City - Brgy. 1235",
+    "CK",
+    "Carl Klaro",
+    "+3",
+    "Available",
+  ],
+  [
+    "14:00",
+    "TODAY",
+    "WO-91283",
+    "Seaside Condominium",
+    "Manila City - Roxas Blvd.",
+    "MJ",
+    "Mark James",
+    "+3",
+    "Available",
+  ],
+  [
+    "09:00",
+    "Tomorrow",
+    "WO-91283",
+    "JV Restaurant",
+    "Pasay City - Brgy. 145",
+    "JV",
+    "James Via",
+    "+2",
+    "Available",
+  ],
+  [
+    "TBA",
+    "09/30/2026",
+    "WO-91283",
+    "HarborBridge Gateway",
+    "Pasay City - Brgy. 1235",
+    "CK",
+    "Carl Klaro",
+    "+1",
+    "1 Shortage",
+  ],
+];
 
 const row =
   "grid grid-cols-[1.05fr_1.42fr_1.18fr_1fr_28px] items-center px-5 max-[620px]:grid-cols-[1fr_1.5fr_1.2fr_22px] max-[620px]:px-[9px]";
@@ -63,7 +139,7 @@ function Dashboard() {
             <section className="overflow-hidden rounded-[11px] border border-[#dfe6ec] bg-white shadow-[0_3px_7px_rgb(31_59_82_/_10%)] max-[620px]:overflow-visible max-[620px]:border-0 max-[620px]:bg-transparent max-[620px]:shadow-none">
               <header className="flex items-center justify-between px-[22px] pb-[14px] pt-5 max-[1024px]:px-3 max-[1024px]:pb-3 max-[1024px]:pt-3 max-[620px]:rounded-[6px] max-[620px]:bg-white">
                 <div>
-                  <p className={label}>Live board · {jobs.length} scheduled</p>
+                  <p className={label}>Live board · 7 scheduled</p>
                   <h2 className="m-0 mt-1 text-[21px] font-bold max-[1024px]:text-[13px]">
                     Upcoming jobs
                   </h2>
@@ -89,11 +165,7 @@ function Dashboard() {
                   <span>Stock check</span>
                   <span>Open</span>
                 </div>
-                {jobs.length === 0 ? (
-                  <p className="px-5 py-8 text-center text-[12px] text-[#8d969e]">
-                    No scheduled jobs yet.
-                  </p>
-                ) : jobs.map((job, index) => (
+                {jobs.map((job, index) => (
                   <div
                     className={`${row} min-h-[62px] border-b border-[#e0e0e0] text-[10px] last:border-0 max-[1024px]:min-h-[56px] max-[1024px]:text-[8px] max-[1024px]:px-3 max-[620px]:mb-1 max-[620px]:min-h-[67px] max-[620px]:rounded-[6px] max-[620px]:border max-[620px]:px-3 max-[620px]:py-2 max-[620px]:[&>*:nth-child(4)]:hidden ${index === 3 ? "max-[620px]:hidden" : ""}`}
                     role="row"
@@ -158,14 +230,25 @@ function Dashboard() {
                 </span>
               </header>
               <div className="mt-[22px] max-[1024px]:mt-3">
-                {jobs.length === 0 ? (
-                  <p className="py-6 text-center text-[12px] text-[#8e959b]">
-                    No operational alerts yet.
-                  </p>
-                ) : [
-                  ["warning", "text-[#ff725f]", "Parts below reorder point", ""],
-                  ["assignment", "text-[#2467ae]", "Reports in review queue", ""],
-                  ["account_balance", "text-[#063b7c]", "Outstanding invoices", ""],
+                {[
+                  [
+                    "warning",
+                    "text-[#ff725f]",
+                    "3 parts below reorder point",
+                    "CDI Alarm, Microchip",
+                  ],
+                  [
+                    "assignment",
+                    "text-[#2467ae]",
+                    "4 reports in review queue",
+                    "1 has missing client sign-off",
+                  ],
+                  [
+                    "account_balance",
+                    "text-[#063b7c]",
+                    "₱64,343 outstanding",
+                    "2 invoice due this cycle",
+                  ],
                 ].map(([icon, color, title, note]) => (
                   <a
                     className="mb-3 flex min-h-[50px] items-center gap-2 rounded-[5px] border border-[#dbe0e5] bg-white p-2.5 text-[#063b7c] no-underline max-[1024px]:mb-2 max-[1024px]:min-h-[47px] max-[1024px]:p-2"

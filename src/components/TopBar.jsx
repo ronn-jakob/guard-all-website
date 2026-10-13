@@ -1,9 +1,33 @@
 import { useEffect, useState, useRef } from "react";
 
+const initialNotifications = [
+  {
+    id: 1,
+    title: "New Service Field Report",
+    message: "FSR - 2026 - 0415 submitted by Tech Manila.",
+    time: "10 mins ago",
+    unread: true,
+  },
+  {
+    id: 2,
+    title: "Invoice Approved",
+    message: "INV - 10822 payment verified by Alder House Hotel.",
+    time: "1 hour ago",
+    unread: true,
+  },
+  {
+    id: 3,
+    title: "Schedule Updated",
+    message: "Maintenance inspection assigned for tomorrow at 9:00 AM.",
+    time: "3 hours ago",
+    unread: false,
+  },
+];
+
 function TopBar() {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [isOpen, setIsOpen] = useState(false);
-  const [notifications, setNotifications] = useState([]);
+  const [notifications, setNotifications] = useState(initialNotifications);
   const dropdownRef = useRef(null);
 
   useEffect(() => {

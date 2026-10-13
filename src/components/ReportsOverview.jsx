@@ -1,10 +1,148 @@
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { Link } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { callAuthFunction } from "../lib/auth.js";
+import { useState } from "react";
 
+const reports = [
+  {
+    id: "FSR-2026-3253",
+    client: "Northbridge Dental Clinic",
+    service: "CCTV Installation",
+    technician: "Carl Klaro",
+    time: "Today, 8:34 AM",
+    status: "Needs Review",
+    tone: "orange",
+  },
+  {
+    id: "FSR-2026-3655",
+    client: "Cattleya Condominium",
+    service: "CCTV Installation and Alarm Maintenance",
+    technician: "John Lee",
+    time: "Today, 8:12 AM",
+    status: "Submitted",
+    tone: "gray",
+  },
+  {
+    id: "FSR-2026-3664",
+    client: "Aldrin Compound",
+    service: "Automated Door Locks Consultation",
+    technician: "Carl Klaro",
+    time: "Sep 11, 11:11 AM",
+    status: "Ready for Billing",
+    tone: "green",
+  },
+];
 
+const reportDetails = {
+  "FSR-2026-3253": {
+    workSummary:
+      "Installed and commissioned the CCTV system at Northbridge Dental Clinic. Six camera feeds were tested at the recorder, the front-desk monitor was configured, and the clinic manager verified the live view and playback. The recorder was left online and the manager was shown how to export a clip.",
+    parts: [
+      { sku: "CAM-123", description: "Indoor dome camera", quantity: 3, note: "Installed" },
+      { sku: "NVR-008", description: "8-channel network recorder", quantity: 1, note: "Configured" },
+      { sku: "CAT6-100", description: "CAT6 cable (meters)", quantity: 42, note: "Consumed" },
+      { sku: "CON-014", description: "RJ45 connector", quantity: 12, note: "Consumed" },
+    ],
+    images: [
+      {
+        name: "IMG-34h2349f132e.png",
+        src: "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80",
+        alt: "Close-up of electronic components",
+      },
+      {
+        name: "IMG-34h2350f132f.png",
+        src: "https://images.unsplash.com/photo-1581092921461-eab62e97a780?auto=format&fit=crop&w=900&q=80",
+        alt: "Technician inspecting installed equipment",
+      },
+    ],
+    signature: {
+      signer: "Mark Roberts",
+      signedAt: "Tuesday, Sep 14 2026 · 11:12 AM",
+      method: "Signed on device",
+    },
+    billing: {
+      readiness: "Ready for manager review",
+      inventory: "Reconciled",
+      reference: "BILL-2026-1048",
+    },
+    audit: [
+      { time: "8:34 AM", action: "Report submitted", actor: "Carl Klaro" },
+      { time: "11:12 AM", action: "Client sign-off captured", actor: "Mark Roberts" },
+      { time: "11:18 AM", action: "Queued for manager review", actor: "System" },
+    ],
+  },
+  "FSR-2026-3655": {
+    workSummary:
+      "Completed the scheduled CCTV and alarm maintenance at Cattleya Condominium. Camera views were checked, the alarm panel was tested, and the building representative received a walkthrough of the test results and any follow-up recommendations.",
+    parts: [
+      { sku: "CAM-123", description: "Indoor dome camera", quantity: 1, note: "Re-aimed and tested" },
+      { sku: "BAT-009", description: "Alarm backup battery", quantity: 2, note: "Replaced" },
+      { sku: "CON-014", description: "RJ45 connector", quantity: 4, note: "Consumed" },
+    ],
+    images: [
+      {
+        name: "IMG-CC-2026-091.png",
+        src: "https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80",
+        alt: "Close-up of electronic components",
+      },
+      {
+        name: "IMG-CC-2026-092.png",
+        src: "https://images.unsplash.com/photo-1581092921461-eab62e97a780?auto=format&fit=crop&w=900&q=80",
+        alt: "Technician inspecting installed equipment",
+      },
+    ],
+    signature: {
+      signer: "Mira Castillo",
+      signedAt: "Tuesday, Sep 14 2026 · 10:46 AM",
+      method: "Signed on device",
+    },
+    billing: {
+      readiness: "Awaiting report review",
+      inventory: "Reconciled",
+      reference: "BILL-2026-1051",
+    },
+    audit: [
+      { time: "8:12 AM", action: "Report submitted", actor: "John Lee" },
+      { time: "10:46 AM", action: "Client sign-off captured", actor: "Mira Castillo" },
+    ],
+  },
+  "FSR-2026-3664": {
+    workSummary:
+      "Assessed the automated door locks at Aldrin Compound and completed the requested lock controller consultation. The access schedule was reviewed with the client, controller settings were verified, and operating recommendations were documented for the property manager.",
+    parts: [
+      { sku: "ACS-220", description: "Access controller", quantity: 1, note: "Inspected; retained" },
+      { sku: "LOCK-041", description: "Electronic door lock", quantity: 2, note: "Function tested" },
+      { sku: "CAB-016", description: "Low-voltage cable (meters)", quantity: 8, note: "Consumed" },
+    ],
+    images: [
+      {
+        name: "IMG-AC-2026-114.png",
+        src: "https://images.unsplash.com/photo-1558008258-3256797b43f3?auto=format&fit=crop&w=900&q=80",
+        alt: "Security access device mounted at an entrance",
+      },
+      {
+        name: "IMG-AC-2026-115.png",
+        src: "https://images.unsplash.com/photo-1581092921461-eab62e97a780?auto=format&fit=crop&w=900&q=80",
+        alt: "Technician inspecting installed equipment",
+      },
+    ],
+    signature: {
+      signer: "Aldrin Reyes",
+      signedAt: "Sep 11 2026 · 12:02 PM",
+      method: "Signed on device",
+    },
+    billing: {
+      readiness: "Ready for billing",
+      inventory: "Reconciled",
+      reference: "BILL-2026-0974",
+    },
+    audit: [
+      { time: "11:11 AM", action: "Report submitted", actor: "Carl Klaro" },
+      { time: "12:02 PM", action: "Client sign-off captured", actor: "Aldrin Reyes" },
+      { time: "12:15 PM", action: "Approved for billing", actor: "Operations" },
+    ],
+  },
+};
 
 const statusStyles = {
   orange: "border-[#ff9f8f] bg-[#ffe5df] text-[#e05b45]",
@@ -23,35 +161,11 @@ function StatusPill({ children, tone }) {
 }
 
 function ReportsOverview() {
-  const [reports, setReports] = useState([]);
-  const [selectedReportId, setSelectedReportId] = useState(null);
+  const [selectedReportId, setSelectedReportId] = useState(reports[0].id);
   const [isFullDetailsOpen, setIsFullDetailsOpen] = useState(false);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    callAuthFunction("list-field-reports")
-      .then(({ reports: incomingReports = [] }) => {
-        if (!isMounted) return;
-        const nextReports = Array.isArray(incomingReports) ? incomingReports : [];
-        setReports(nextReports);
-        setSelectedReportId(nextReports[0]?.id ?? null);
-      })
-      .catch(() => {
-        if (isMounted) {
-          setReports([]);
-          setSelectedReportId(null);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
   const selectedReport =
-    reports.find((report) => report.id === selectedReportId) || reports[0] || null;
-  const selectedReportDetails = selectedReport;
+    reports.find((report) => report.id === selectedReportId) || reports[0];
+  const selectedReportDetails = reportDetails[selectedReport.id];
 
   return (
     <main className="flex h-screen overflow-hidden bg-[#1f2022] font-sans text-[#063b7c] max-[1024px]:block">
@@ -82,10 +196,10 @@ function ReportsOverview() {
 
           <div className="mb-4 grid grid-cols-4 gap-4 max-[850px]:grid-cols-2 max-[620px]:gap-2">
             {[
-              ["Needs Review", String(reports.filter((report) => report.status === "Needs Review").length), "text-[#e34f2d]"],
-              ["Submitted", String(reports.filter((report) => report.status === "Submitted").length), "text-[#15519c]"],
-              ["Ready for Billing", String(reports.filter((report) => report.status === "Ready for Billing").length), "text-[#388b47]"],
-              ["Sign-off Captured", String(reports.filter((report) => report.signature?.method !== "Awaiting client sign-off").length), "text-[#15519c]"],
+              ["Needs Review", "1", "text-[#e34f2d]"],
+              ["Submitted", "1", "text-[#15519c]"],
+              ["Ready for Billing", "2", "text-[#388b47]"],
+              ["Sign-off Captured", "4", "text-[#15519c]"],
             ].map(([label, value, color]) => (
               <article
                 className="rounded-[10px] border border-[#dfe6ec] bg-white px-5 py-4 shadow-[0_3px_8px_rgb(31_59_82_/_14%)] max-[620px]:px-3 max-[620px]:py-3"
@@ -106,135 +220,109 @@ function ReportsOverview() {
               <header className="flex items-start justify-between border-b border-[#e1e6eb] px-5 py-4">
                 <div>
                   <h2 className="m-0 text-[15px] font-bold text-[#68798a]">Incoming Reports</h2>
-                  <p className="m-0 mt-1 text-[12px] text-[#8b949c]">{reports.length ? `${reports.length} report${reports.length === 1 ? "" : "s"} in current queue` : "No reports in current queue"}</p>
+                  <p className="m-0 mt-1 text-[12px] text-[#8b949c]">3 reports in current queue</p>
                 </div>
                 <button className="border-0 bg-transparent p-0 text-[#7b8792]" type="button">
                   <span className="material-symbols-outlined text-[21px]">filter_alt</span>
                 </button>
               </header>
               <div>
-                {reports.length === 0 ? (
-                  <div className="px-5 py-8 text-center text-[13px] text-[#7d8994]">
-                    No incoming reports yet. Submit a new field report to populate this queue.
-                  </div>
-                ) : (
-                  reports.map((report) => (
-                    <button
-                      className={`block w-full border-b border-[#e1e6eb] px-5 py-4 text-left last:border-b-0 transition-colors hover:bg-[#f4f8ff] ${report.id === selectedReportId ? "border-l-4 border-l-[#286fc7] bg-[#eef4ff]" : ""}`}
-                      key={report.id}
-                      type="button"
-                      onClick={() => setSelectedReportId(report.id)}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <strong className="text-[11px] font-bold text-[#35649a]">{report.id}</strong>
-                        <StatusPill tone={report.tone}>{report.status}</StatusPill>
-                      </div>
-                      <h3 className="m-0 mt-3 text-[15px] font-bold text-[#174276]">{report.client}</h3>
-                      <p className="m-0 mt-1 text-[12px] text-[#7d8994]">{report.service}</p>
-                      <div className="mt-3 flex items-center justify-between text-[11px] text-[#8b949c]">
-                        <span>{report.technician}</span>
-                        <span>{report.time}</span>
-                      </div>
-                    </button>
-                  ))
-                )}
+                {reports.map((report) => (
+                  <button
+                    className={`block w-full border-b border-[#e1e6eb] px-5 py-4 text-left last:border-b-0 transition-colors hover:bg-[#f4f8ff] ${report.id === selectedReportId ? "border-l-4 border-l-[#286fc7] bg-[#eef4ff]" : ""}`}
+                    key={report.id}
+                    type="button"
+                    onClick={() => setSelectedReportId(report.id)}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <strong className="text-[11px] font-bold text-[#35649a]">{report.id}</strong>
+                      <StatusPill tone={report.tone}>{report.status}</StatusPill>
+                    </div>
+                    <h3 className="m-0 mt-3 text-[15px] font-bold text-[#174276]">{report.client}</h3>
+                    <p className="m-0 mt-1 text-[12px] text-[#7d8994]">{report.service}</p>
+                    <div className="mt-3 flex items-center justify-between text-[11px] text-[#8b949c]">
+                      <span>{report.technician}</span>
+                      <span>{report.time}</span>
+                    </div>
+                  </button>
+                ))}
               </div>
             </section>
 
-            {selectedReport ? (
-              <section className="overflow-hidden rounded-[10px] border border-[#dfe6ec] bg-white shadow-[0_3px_8px_rgb(31_59_82_/_12%)]">
-                <header className="flex items-start justify-between border-b border-[#e1e6eb] px-6 py-5 max-[620px]:px-4">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <strong className="text-[12px] font-bold text-[#35649a]">{selectedReport.id}</strong>
-                      <StatusPill tone={selectedReport.tone}>{selectedReport.status}</StatusPill>
-                    </div>
-                    <h2 className="m-0 mt-2 text-[17px] font-bold text-[#174276]">{selectedReport.client}</h2>
-                    <p className="m-0 mt-1 text-[11px] text-[#8b949c]">{selectedReport.service} &nbsp;•&nbsp; Submitted {selectedReport.time}</p>
+            <section className="overflow-hidden rounded-[10px] border border-[#dfe6ec] bg-white shadow-[0_3px_8px_rgb(31_59_82_/_12%)]">
+              <header className="flex items-start justify-between border-b border-[#e1e6eb] px-6 py-5 max-[620px]:px-4">
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <strong className="text-[12px] font-bold text-[#35649a]">{selectedReport.id}</strong>
+                    <StatusPill tone={selectedReport.tone}>{selectedReport.status}</StatusPill>
                   </div>
-                  <div className="flex items-center gap-2 text-[12px] text-[#707b86]">
-                    <span className="grid h-7 w-7 place-items-center rounded-full bg-[#d65c58] text-[11px] font-bold text-white">{selectedReport.technician.split(" ").map((name) => name[0]).join("").slice(0, 2).toUpperCase() || "T"}</span>
-                    {selectedReport.technician}
-                  </div>
-                </header>
+                  <h2 className="m-0 mt-2 text-[17px] font-bold text-[#174276]">{selectedReport.client}</h2>
+                  <p className="m-0 mt-1 text-[11px] text-[#8b949c]">WO-8875 &nbsp;•&nbsp; Submitted {selectedReport.time}</p>
+                </div>
+                <div className="flex items-center gap-2 text-[12px] text-[#707b86]">
+                  <span className="grid h-7 w-7 place-items-center rounded-full bg-[#d65c58] text-[11px] font-bold text-white">CK</span>
+                  {selectedReport.technician}
+                </div>
+              </header>
 
-                <div className="grid grid-cols-[1.25fr_1fr] gap-6 px-6 py-5 max-[620px]:grid-cols-1 max-[620px]:px-4">
-                  <div>
-                    <p className="m-0 text-[11px] font-bold uppercase tracking-[.08em] text-[#7d8994]">01 / Work Summary</p>
-                    <h3 className="m-0 mt-3 text-[15px] font-bold text-[#174276]">{selectedReport.service}</h3>
-                    <p className="m-0 mt-2 text-[12px] leading-relaxed text-[#7d8994]">
-                      {selectedReport.workSummary}
-                    </p>
-                    <div className="my-4 border-t border-[#e1e6eb]" />
-                    <p className="m-0 text-[11px] font-bold uppercase tracking-[.08em] text-[#7d8994]">02 / Parts Used</p>
-                    <div className="mt-3 rounded-[7px] border border-[#bac8db] bg-[#eef4ff] px-4 py-3 text-[12px] text-[#35649a]">
-                      {selectedReport.parts.length === 0 ? (
-                        <div className="text-[#68798a]">No parts were recorded for this report.</div>
-                      ) : (
-                        <>
-                          {selectedReport.parts.slice(0, 3).map((part) => (
-                            <div className="flex items-center justify-between gap-3 py-1.5 font-bold" key={part.sku}>
-                              <span>{part.quantity} x {part.sku}</span>
-                              <span className="font-normal text-[#8b949c]">{part.note}</span>
-                            </div>
-                          ))}
-                          {selectedReport.parts.length > 3 && (
-                            <div className="mt-3 border-t border-[#cbd8e7] pt-3 text-center text-[#68798a]">Show More</div>
-                          )}
-                        </>
-                      )}
+              <div className="grid grid-cols-[1.25fr_1fr] gap-6 px-6 py-5 max-[620px]:grid-cols-1 max-[620px]:px-4">
+                <div>
+                  <p className="m-0 text-[11px] font-bold uppercase tracking-[.08em] text-[#7d8994]">01 / Work Summary</p>
+                  <h3 className="m-0 mt-3 text-[15px] font-bold text-[#174276]">{selectedReport.service}</h3>
+                  <p className="m-0 mt-2 text-[12px] leading-relaxed text-[#7d8994]">
+                    Lorem ipsum dolor sit amet consectetur adipisicing elit. Dolor quod labore quod est autem minus. Sint at dolorum nulla eum et voluptas exercitation cupiditate et in.
+                  </p>
+                  <div className="my-4 border-t border-[#e1e6eb]" />
+                  <p className="m-0 text-[11px] font-bold uppercase tracking-[.08em] text-[#7d8994]">02 / Parts Used</p>
+                  <div className="mt-3 rounded-[7px] border border-[#bac8db] bg-[#eef4ff] px-4 py-3 text-[12px] text-[#35649a]">
+                    <div className="flex items-center justify-between font-bold">
+                      <span>1 x CAM-123</span>
+                      <span className="font-normal text-[#8b949c]">3x used</span>
                     </div>
-                  </div>
-
-                  <div className="space-y-3">
-                    <div className="rounded-[7px] border border-[#bac8db] bg-[#f3f7fd] p-4">
-                      <p className="m-0 text-[11px] font-bold uppercase tracking-[.08em] text-[#7d8994]">Attached Images</p>
-                      {selectedReport.images.length === 0 ? (
-                        <div className="mt-3 text-[12px] text-[#8b949c]">No images attached.</div>
-                      ) : (
-                        <div className="mt-3 flex items-center justify-between text-[12px] text-[#8b949c]">
-                          <span className="flex items-center gap-2"><span className="material-symbols-outlined text-[18px]">image</span>{selectedReport.images[0].name}</span>
-                          <strong className="text-[11px]">Open</strong>
-                        </div>
-                      )}
-                    </div>
-                    <div className="rounded-[7px] border border-[#9ed6a8] bg-[#effbef] p-4 text-[12px] text-[#5b9764]">
-                      <div className="flex items-center justify-between font-bold"><span>✓ &nbsp; Client Sign-off</span><span className="font-normal">{selectedReport.signature?.signedAt || "Pending"}</span></div>
-                      <div className="mt-3 flex justify-between text-[11px]"><span>{selectedReport.signature?.signer || "Client Name"} · {selectedReport.signature?.method || "Awaiting sign-off"}</span><span>{selectedReport.time}</span></div>
-                    </div>
-                    <div className="rounded-[7px] border border-[#bac8db] bg-[#eef4ff] p-4 text-[12px] text-[#5b9764]">
-                      <p className="m-0 font-bold uppercase tracking-[.08em] text-[#7d8994]">Billing Readiness</p>
-                      <p className="m-0 mt-4 font-bold">✓ &nbsp; {selectedReport.billing?.inventory || "Pending"}</p>
-                      <p className="m-0 mt-3 font-bold">✓ &nbsp; {selectedReport.billing?.readiness || "Awaiting review"}</p>
-                    </div>
+                    <div className="mt-3 border-t border-[#cbd8e7] pt-3 text-center text-[#68798a]">Show More</div>
                   </div>
                 </div>
 
-                <footer className="flex items-center justify-between border-t border-[#e1e6eb] bg-[#eef4ff] px-6 py-4 max-[620px]:flex-col max-[620px]:items-stretch max-[620px]:gap-3 max-[620px]:px-4">
-                  <a
-                    className="text-[13px] font-bold text-[#7a8793] no-underline hover:text-[#174f9a]"
-                    href="#details"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      setIsFullDetailsOpen(true);
-                    }}
-                  >
-                    Show Full Details
-                  </a>
-                  <div className="flex gap-3 max-[620px]:flex-1">
-                    <Link className="inline-flex h-10 flex-1 items-center justify-center rounded-[7px] border-2 border-[#c5ccd6] bg-transparent px-4 text-[12px] font-bold text-[#89939e] no-underline" to="/reports">Return for Correction</Link>
-                    <button className="flex h-10 flex-1 items-center justify-center gap-2 rounded-[7px] bg-[#1953a5] px-4 text-[12px] font-bold text-white" type="button">
-                      <span className="material-symbols-outlined text-[17px]">send</span>
-                      Approve for Billing
-                    </button>
+                <div className="space-y-3">
+                  <div className="rounded-[7px] border border-[#bac8db] bg-[#f3f7fd] p-4">
+                    <p className="m-0 text-[11px] font-bold uppercase tracking-[.08em] text-[#7d8994]">Attached Images</p>
+                    <div className="mt-3 flex items-center justify-between text-[12px] text-[#8b949c]">
+                      <span className="flex items-center gap-2"><span className="material-symbols-outlined text-[18px]">image</span>IMG-34h2349f132e.png</span>
+                      <strong className="text-[11px]">Open</strong>
+                    </div>
                   </div>
-                </footer>
-              </section>
-            ) : (
-              <section className="rounded-[10px] border border-dashed border-[#cbd8e7] bg-white px-5 py-8 text-center text-[14px] text-[#778593]">
-                No incoming reports. Submit a new report to populate this queue.
-              </section>
-            )}
+                  <div className="rounded-[7px] border border-[#9ed6a8] bg-[#effbef] p-4 text-[12px] text-[#5b9764]">
+                    <div className="flex items-center justify-between font-bold"><span>✓ &nbsp; Client Sign-off</span><span className="font-normal">11:12 AM</span></div>
+                    <div className="mt-3 flex justify-between text-[11px]"><span>Mark Roberts Signed on device</span><span>Tuesday, Sep 14 2026</span></div>
+                  </div>
+                  <div className="rounded-[7px] border border-[#bac8db] bg-[#eef4ff] p-4 text-[12px] text-[#5b9764]">
+                    <p className="m-0 font-bold uppercase tracking-[.08em] text-[#7d8994]">Billing Readiness</p>
+                    <p className="m-0 mt-4 font-bold">✓ &nbsp; Inventory reconciled</p>
+                    <p className="m-0 mt-3 font-bold">✓ &nbsp; Sign-off captured</p>
+                  </div>
+                </div>
+              </div>
+
+              <footer className="flex items-center justify-between border-t border-[#e1e6eb] bg-[#eef4ff] px-6 py-4 max-[620px]:flex-col max-[620px]:items-stretch max-[620px]:gap-3 max-[620px]:px-4">
+                <a
+                  className="text-[13px] font-bold text-[#7a8793] no-underline hover:text-[#174f9a]"
+                  href="#details"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    setIsFullDetailsOpen(true);
+                  }}
+                >
+                  Show Full Details
+                </a>
+                <div className="flex gap-3 max-[620px]:flex-1">
+                  <Link className="inline-flex h-10 flex-1 items-center justify-center rounded-[7px] border-2 border-[#c5ccd6] bg-transparent px-4 text-[12px] font-bold text-[#89939e] no-underline" to="/reports">Return for Correction</Link>
+                  <button className="flex h-10 flex-1 items-center justify-center gap-2 rounded-[7px] bg-[#1953a5] px-4 text-[12px] font-bold text-white" type="button">
+                    <span className="material-symbols-outlined text-[17px]">send</span>
+                    Approve for Billing
+                  </button>
+                </div>
+              </footer>
+            </section>
           </div>
 
           <footer className="mt-6 border-t border-[#c9d4de] pt-3 text-[12px] text-[#8a9299] max-[1024px]:hidden">
