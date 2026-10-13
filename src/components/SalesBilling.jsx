@@ -64,16 +64,15 @@ function SalesBilling() {
       prev.map((inv) =>
         inv.id === id
           ? { ...inv, status: inv.status === "Paid" ? "Pending" : "Paid" }
-          : inv
-      )
+          : inv,
+      ),
     );
   };
 
   // Filter invoices by tab and selected date from calendar
   const filteredInvoices = useMemo(() => {
     return invoicesList.filter((inv) => {
-      const matchesTab =
-        filterTab === "All" ? true : inv.status === filterTab;
+      const matchesTab = filterTab === "All" ? true : inv.status === filterTab;
       const matchesDate = selectedDate ? inv.date === selectedDate : true;
       return matchesTab && matchesDate;
     });
@@ -89,7 +88,7 @@ function SalesBilling() {
       .filter((inv) => inv.status === "Pending")
       .reduce((acc, curr) => acc + curr.amount, 0);
     const pendingCount = invoicesList.filter(
-      (inv) => inv.status === "Pending"
+      (inv) => inv.status === "Pending",
     ).length;
 
     return [

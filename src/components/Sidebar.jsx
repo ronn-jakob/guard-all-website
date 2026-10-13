@@ -27,7 +27,10 @@ function Sidebar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profilePhoto, setProfilePhoto] = useState(
-    () => localStorage.getItem(profilePhotoKey) || localStorage.getItem("profilePhoto") || "",
+    () =>
+      localStorage.getItem(profilePhotoKey) ||
+      localStorage.getItem("profilePhoto") ||
+      "",
   );
   const navigate = useNavigate();
 
@@ -56,7 +59,7 @@ function Sidebar() {
   };
 
   return (
-  <aside className="sticky top-0 flex h-screen w-[249px] flex-none flex-col bg-[#174f9a] text-white max-[1024px]:pointer-events-none max-[1024px]:fixed max-[1024px]:left-0 max-[1024px]:top-0 max-[1024px]:z-40 max-[1024px]:h-0 max-[1024px]:w-full max-[1024px]:bg-transparent">
+    <aside className="sticky top-0 flex h-screen w-[249px] flex-none flex-col bg-[#174f9a] text-white max-[1024px]:pointer-events-none max-[1024px]:fixed max-[1024px]:left-0 max-[1024px]:top-0 max-[1024px]:z-40 max-[1024px]:h-0 max-[1024px]:w-full max-[1024px]:bg-transparent">
       <div className="grid h-[67px] place-items-center border-b border-white/25 bg-[#1250a0] max-[1024px]:hidden">
         <img
           className="max-h-[52px] w-[150px] object-contain"
@@ -75,16 +78,19 @@ function Sidebar() {
           {menuOpen ? "close" : "menu"}
         </span>
       </button>
-      <div className={`px-[18px] py-7 max-[1024px]:pointer-events-auto max-[1024px]:fixed max-[1024px]:bottom-0 max-[1024px]:left-0 max-[1024px]:top-0 max-[1024px]:z-40 max-[1024px]:w-[260px] max-[1024px]:border-r max-[1024px]:border-white/15 max-[1024px]:bg-[#174f9a] max-[1024px]:p-3 max-[1024px]:pt-16 max-[1024px]:shadow-[6px_0_18px_rgb(4_35_78_/_22%)] ${menuOpen ? "" : "max-[1024px]:hidden"}`}>
+      <div
+        className={`px-[18px] py-7 max-[1024px]:pointer-events-auto max-[1024px]:fixed max-[1024px]:bottom-0 max-[1024px]:left-0 max-[1024px]:top-0 max-[1024px]:z-40 max-[1024px]:w-[260px] max-[1024px]:border-r max-[1024px]:border-white/15 max-[1024px]:bg-[#174f9a] max-[1024px]:p-3 max-[1024px]:pt-16 max-[1024px]:shadow-[6px_0_18px_rgb(4_35_78_/_22%)] ${menuOpen ? "" : "max-[1024px]:hidden"}`}
+      >
         <p className="mb-3 ml-4 text-[10px] font-bold uppercase tracking-[.14em] text-[#a9c7ed] max-[1024px]:hidden">
           Operation console
         </p>
         <nav className="space-y-1 max-[1024px]:flex max-[1024px]:flex-col max-[1024px]:gap-1">
           {navigation.map(([icon, name, path, module]) => {
             const enabled = !module || canAccessModule(module, role);
-            const targetPath = name === "Field Reports" && role === "Technician"
-              ? "/reports/new"
-              : path;
+            const targetPath =
+              name === "Field Reports" && role === "Technician"
+                ? "/reports/new"
+                : path;
             const content = (isActive = false) => (
               <>
                 <span
@@ -95,7 +101,11 @@ function Sidebar() {
                   </span>
                 </span>
                 {name}
-                {!enabled && <span className="material-symbols-outlined ml-auto text-[15px] opacity-70">lock</span>}
+                {!enabled && (
+                  <span className="material-symbols-outlined ml-auto text-[15px] opacity-70">
+                    lock
+                  </span>
+                )}
               </>
             );
 
@@ -133,7 +143,11 @@ function Sidebar() {
             type="button"
           >
             {profilePhoto ? (
-              <img className="h-8 w-8 rounded-full object-cover" src={profilePhoto} alt="" />
+              <img
+                className="h-8 w-8 rounded-full object-cover"
+                src={profilePhoto}
+                alt=""
+              />
             ) : (
               <div className="grid h-8 w-8 place-items-center rounded-full bg-[#ff4825] text-[10px] font-bold">
                 {initials}
@@ -180,16 +194,20 @@ function Sidebar() {
           onClick={() => setProfileOpen((isOpen) => !isOpen)}
         >
           {profilePhoto ? (
-            <img className="h-9 w-9 flex-none rounded-full object-cover" src={profilePhoto} alt="" />
+            <img
+              className="h-9 w-9 flex-none rounded-full object-cover"
+              src={profilePhoto}
+              alt=""
+            />
           ) : (
             <div className="grid h-9 w-9 flex-none place-items-center rounded-full bg-[#ff4825] text-[12px] font-bold">
-                {initials}
+              {initials}
             </div>
           )}
           <div>
-              <strong className="block text-[13px]">{displayName}</strong>
+            <strong className="block text-[13px]">{displayName}</strong>
             <small className="block text-[11px] text-[#d6e4f9]">
-                {role || "No role"}
+              {role || "No role"}
             </small>
           </div>
           <span

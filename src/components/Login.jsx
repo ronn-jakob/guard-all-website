@@ -101,7 +101,10 @@ const Login = () => {
               {isSubmitting ? "Signing in..." : "Login"}
             </button>
             {formError && (
-              <p className="m-0 text-center text-[11px] text-[#b64132]" role="alert">
+              <p
+                className="m-0 text-center text-[11px] text-[#b64132]"
+                role="alert"
+              >
                 {formError}
               </p>
             )}

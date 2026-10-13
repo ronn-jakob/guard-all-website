@@ -17,7 +17,9 @@ function Settings() {
     ? `profilePhoto:${sessionUser.id}`
     : "profilePhoto";
   const [profile, setProfile] = useState(() => ({
-    ...splitDisplayName(sessionUser?.name || localStorage.getItem("profileName") || ""),
+    ...splitDisplayName(
+      sessionUser?.name || localStorage.getItem("profileName") || "",
+    ),
     email: sessionUser?.email || localStorage.getItem("profileEmail") || "",
     phone: localStorage.getItem("profilePhone") || "",
     title: sessionUser?.role || localStorage.getItem("profileTitle") || "",
@@ -26,7 +28,10 @@ function Settings() {
   const [successMessage, setSuccessMessage] = useState("");
   const [profileMessage, setProfileMessage] = useState("");
   const [profilePhoto, setProfilePhoto] = useState(
-    () => localStorage.getItem(profilePhotoKey) || localStorage.getItem("profilePhoto") || "",
+    () =>
+      localStorage.getItem(profilePhotoKey) ||
+      localStorage.getItem("profilePhoto") ||
+      "",
   );
   const [showPasswords, setShowPasswords] = useState(false);
 
@@ -71,7 +76,10 @@ function Settings() {
     };
 
     setProfile(nextProfile);
-    localStorage.setItem("profileName", [firstName, lastName].filter(Boolean).join(" "));
+    localStorage.setItem(
+      "profileName",
+      [firstName, lastName].filter(Boolean).join(" "),
+    );
     localStorage.setItem("profileEmail", nextProfile.email);
     localStorage.setItem("profilePhone", nextProfile.phone);
     localStorage.setItem("profileTitle", nextProfile.title);
@@ -176,7 +184,8 @@ function Settings() {
                       Profile photo
                     </p>
                     <p className="m-0 mt-1 text-[11px] text-[#89939b]">
-                      JPG, PNG, or GIF. Choose a square image for the best result.
+                      JPG, PNG, or GIF. Choose a square image for the best
+                      result.
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
                       <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-[5px] bg-[#1250a0] px-3 text-[11px] font-bold text-white transition hover:bg-[#0e4389]">
@@ -209,7 +218,9 @@ function Settings() {
                     className="h-11 rounded-[6px] border border-[#d6dee6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
                     name="firstName"
                     value={profile.firstName}
-                    onChange={(event) => setProfile({ ...profile, firstName: event.target.value })}
+                    onChange={(event) =>
+                      setProfile({ ...profile, firstName: event.target.value })
+                    }
                     required
                   />
                 </label>
@@ -219,7 +230,9 @@ function Settings() {
                     className="h-11 rounded-[6px] border border-[#d6dee6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
                     name="lastName"
                     value={profile.lastName}
-                    onChange={(event) => setProfile({ ...profile, lastName: event.target.value })}
+                    onChange={(event) =>
+                      setProfile({ ...profile, lastName: event.target.value })
+                    }
                     required
                   />
                 </label>
@@ -230,7 +243,9 @@ function Settings() {
                     name="email"
                     type="email"
                     value={profile.email}
-                    onChange={(event) => setProfile({ ...profile, email: event.target.value })}
+                    onChange={(event) =>
+                      setProfile({ ...profile, email: event.target.value })
+                    }
                     required
                   />
                 </label>
@@ -241,7 +256,9 @@ function Settings() {
                     name="phone"
                     type="tel"
                     value={profile.phone}
-                    onChange={(event) => setProfile({ ...profile, phone: event.target.value })}
+                    onChange={(event) =>
+                      setProfile({ ...profile, phone: event.target.value })
+                    }
                     placeholder="e.g. +63 917 123 4567"
                   />
                 </label>
@@ -256,7 +273,10 @@ function Settings() {
                   />
                 </label>
                 {profileMessage && (
-                  <p className="col-span-full m-0 rounded-[5px] border border-[#a8dfb7] bg-[#effaf2] px-3 py-2 text-[12px] text-[#267340]" role="status">
+                  <p
+                    className="col-span-full m-0 rounded-[5px] border border-[#a8dfb7] bg-[#effaf2] px-3 py-2 text-[12px] text-[#267340]"
+                    role="status"
+                  >
                     {profileMessage}
                   </p>
                 )}
@@ -307,9 +327,13 @@ function Settings() {
                       required
                     />
                     <button
-                      aria-label={showPasswords ? "Hide passwords" : "Show passwords"}
+                      aria-label={
+                        showPasswords ? "Hide passwords" : "Show passwords"
+                      }
                       className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center border-0 bg-transparent text-[#6f7f91] hover:text-[#14519f]"
-                      onClick={() => setShowPasswords((isVisible) => !isVisible)}
+                      onClick={() =>
+                        setShowPasswords((isVisible) => !isVisible)
+                      }
                       type="button"
                     >
                       <span className="material-symbols-outlined text-[17px]">
@@ -330,9 +354,13 @@ function Settings() {
                       required
                     />
                     <button
-                      aria-label={showPasswords ? "Hide passwords" : "Show passwords"}
+                      aria-label={
+                        showPasswords ? "Hide passwords" : "Show passwords"
+                      }
                       className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center border-0 bg-transparent text-[#6f7f91] hover:text-[#14519f]"
-                      onClick={() => setShowPasswords((isVisible) => !isVisible)}
+                      onClick={() =>
+                        setShowPasswords((isVisible) => !isVisible)
+                      }
                       type="button"
                     >
                       <span className="material-symbols-outlined text-[17px]">
@@ -353,9 +381,13 @@ function Settings() {
                       required
                     />
                     <button
-                      aria-label={showPasswords ? "Hide passwords" : "Show passwords"}
+                      aria-label={
+                        showPasswords ? "Hide passwords" : "Show passwords"
+                      }
                       className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center border-0 bg-transparent text-[#6f7f91] hover:text-[#14519f]"
-                      onClick={() => setShowPasswords((isVisible) => !isVisible)}
+                      onClick={() =>
+                        setShowPasswords((isVisible) => !isVisible)
+                      }
                       type="button"
                     >
                       <span className="material-symbols-outlined text-[17px]">
@@ -366,12 +398,18 @@ function Settings() {
                 </label>
 
                 {formError && (
-                  <p className="m-0 rounded-[5px] border border-[#f0b8b0] bg-[#fff1ee] px-3 py-2 text-[12px] text-[#b64132]" role="alert">
+                  <p
+                    className="m-0 rounded-[5px] border border-[#f0b8b0] bg-[#fff1ee] px-3 py-2 text-[12px] text-[#b64132]"
+                    role="alert"
+                  >
                     {formError}
                   </p>
                 )}
                 {successMessage && (
-                  <p className="m-0 rounded-[5px] border border-[#a8dfb7] bg-[#effaf2] px-3 py-2 text-[12px] text-[#267340]" role="status">
+                  <p
+                    className="m-0 rounded-[5px] border border-[#a8dfb7] bg-[#effaf2] px-3 py-2 text-[12px] text-[#267340]"
+                    role="status"
+                  >
                     {successMessage}
                   </p>
                 )}
@@ -396,7 +434,8 @@ function Settings() {
                 Account security
               </h2>
               <p className="m-0 mt-2 text-[12px] leading-relaxed text-[#7f8b96]">
-                Use a password with at least 8 characters. You will need the new password the next time you sign in as admin.
+                Use a password with at least 8 characters. You will need the new
+                password the next time you sign in as admin.
               </p>
             </aside>
           </div>

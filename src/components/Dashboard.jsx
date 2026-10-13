@@ -13,9 +13,10 @@ const label =
 function Dashboard() {
   const accountName = getSession()?.user?.name || "";
   const nameParts = accountName.trim().split(/\s+/).filter(Boolean);
-  const greetingName = nameParts.length > 1
-    ? `${nameParts[0][0].toUpperCase()}. ${nameParts.slice(1).join(" ")}`
-    : accountName;
+  const greetingName =
+    nameParts.length > 1
+      ? `${nameParts[0][0].toUpperCase()}. ${nameParts.slice(1).join(" ")}`
+      : accountName;
 
   return (
     <main className="flex h-screen overflow-hidden bg-[#1f2022] font-sans text-[#063b7c] max-[1024px]:block">
@@ -93,51 +94,53 @@ function Dashboard() {
                   <p className="px-5 py-8 text-center text-[12px] text-[#8d969e]">
                     No scheduled jobs yet.
                   </p>
-                ) : jobs.map((job, index) => (
-                  <div
-                    className={`${row} min-h-[62px] border-b border-[#e0e0e0] text-[10px] last:border-0 max-[1024px]:min-h-[56px] max-[1024px]:text-[8px] max-[1024px]:px-3 max-[620px]:mb-1 max-[620px]:min-h-[67px] max-[620px]:rounded-[6px] max-[620px]:border max-[620px]:px-3 max-[620px]:py-2 max-[620px]:[&>*:nth-child(4)]:hidden ${index === 3 ? "max-[620px]:hidden" : ""}`}
-                    role="row"
-                    key={`${job[0]}-${index}`}
-                  >
-                    <div>
-                      <strong className="text-[11px]">{job[0]}</strong>
-                      <em className="ml-[5px] rounded-[2px] bg-[#dbeafa] px-1 py-[3px] text-[8px] not-italic font-bold text-[#184f96]">
-                        {job[1]}
-                      </em>
-                      <small className="mt-1 block text-[9px] text-[#8d969e]">
-                        {job[2]}
-                      </small>
-                    </div>
-                    <div className="min-w-0">
-                      <strong className="block truncate">{job[3]}</strong>
-                      <small className="mt-1 block text-[9px] text-[#8d969e]">
-                        <span className="material-symbols-outlined align-middle text-[10px]">
-                          location_on
-                        </span>{" "}
-                        {job[4]}
-                      </small>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`grid h-7 w-7 place-items-center rounded-full text-[9px] font-bold text-white ${index === 1 ? "bg-[#17549e]" : "bg-[#e24f52]"}`}
-                      >
-                        {job[5]}
-                      </span>
-                      <span>{job[6]}</span>
-                      <b className="ml-1 rounded-[3px] bg-[#d9e8fa] px-[5px] py-1 text-[8px] text-[#15519c]">
-                        {job[7]}
-                      </b>
-                    </div>
-                    <span
-                      className={`w-max rounded-[9px] px-3 py-1.5 text-[8px] ${job[8] === "Available" ? "border border-[#8bdba2] bg-[#dff8e5] text-[#18823a]" : "border border-[#ff9f8f] bg-[#ffe0da] text-[#d75342]"}`}
+                ) : (
+                  jobs.map((job, index) => (
+                    <div
+                      className={`${row} min-h-[62px] border-b border-[#e0e0e0] text-[10px] last:border-0 max-[1024px]:min-h-[56px] max-[1024px]:text-[8px] max-[1024px]:px-3 max-[620px]:mb-1 max-[620px]:min-h-[67px] max-[620px]:rounded-[6px] max-[620px]:border max-[620px]:px-3 max-[620px]:py-2 max-[620px]:[&>*:nth-child(4)]:hidden ${index === 3 ? "max-[620px]:hidden" : ""}`}
+                      role="row"
+                      key={`${job[0]}-${index}`}
                     >
-                      ◎ {job[8]}
-                    </span>
-                    <span className="material-symbols-outlined text-[20px] text-[#15519c]">
-                      chevron_right
-                    </span>
-                  </div>
-                ))}
+                      <div>
+                        <strong className="text-[11px]">{job[0]}</strong>
+                        <em className="ml-[5px] rounded-[2px] bg-[#dbeafa] px-1 py-[3px] text-[8px] not-italic font-bold text-[#184f96]">
+                          {job[1]}
+                        </em>
+                        <small className="mt-1 block text-[9px] text-[#8d969e]">
+                          {job[2]}
+                        </small>
+                      </div>
+                      <div className="min-w-0">
+                        <strong className="block truncate">{job[3]}</strong>
+                        <small className="mt-1 block text-[9px] text-[#8d969e]">
+                          <span className="material-symbols-outlined align-middle text-[10px]">
+                            location_on
+                          </span>{" "}
+                          {job[4]}
+                        </small>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`grid h-7 w-7 place-items-center rounded-full text-[9px] font-bold text-white ${index === 1 ? "bg-[#17549e]" : "bg-[#e24f52]"}`}
+                        >
+                          {job[5]}
+                        </span>
+                        <span>{job[6]}</span>
+                        <b className="ml-1 rounded-[3px] bg-[#d9e8fa] px-[5px] py-1 text-[8px] text-[#15519c]">
+                          {job[7]}
+                        </b>
+                      </div>
+                      <span
+                        className={`w-max rounded-[9px] px-3 py-1.5 text-[8px] ${job[8] === "Available" ? "border border-[#8bdba2] bg-[#dff8e5] text-[#18823a]" : "border border-[#ff9f8f] bg-[#ffe0da] text-[#d75342]"}`}
+                      >
+                        ◎ {job[8]}
+                      </span>
+                      <span className="material-symbols-outlined text-[20px] text-[#15519c]">
+                        chevron_right
+                      </span>
+                    </div>
+                  ))
+                )}
               </div>
             </section>
 
@@ -162,32 +165,49 @@ function Dashboard() {
                   <p className="py-6 text-center text-[12px] text-[#8e959b]">
                     No operational alerts yet.
                   </p>
-                ) : [
-                  ["warning", "text-[#ff725f]", "Parts below reorder point", ""],
-                  ["assignment", "text-[#2467ae]", "Reports in review queue", ""],
-                  ["account_balance", "text-[#063b7c]", "Outstanding invoices", ""],
-                ].map(([icon, color, title, note]) => (
-                  <a
-                    className="mb-3 flex min-h-[50px] items-center gap-2 rounded-[5px] border border-[#dbe0e5] bg-white p-2.5 text-[#063b7c] no-underline max-[1024px]:mb-2 max-[1024px]:min-h-[47px] max-[1024px]:p-2"
-                    href="#attention"
-                    key={title}
-                  >
-                    <span className={`w-5 text-center text-[13px] ${color}`}>
-                      <span className="material-symbols-outlined text-[18px]">
-                        {icon}
+                ) : (
+                  [
+                    [
+                      "warning",
+                      "text-[#ff725f]",
+                      "Parts below reorder point",
+                      "",
+                    ],
+                    [
+                      "assignment",
+                      "text-[#2467ae]",
+                      "Reports in review queue",
+                      "",
+                    ],
+                    [
+                      "account_balance",
+                      "text-[#063b7c]",
+                      "Outstanding invoices",
+                      "",
+                    ],
+                  ].map(([icon, color, title, note]) => (
+                    <a
+                      className="mb-3 flex min-h-[50px] items-center gap-2 rounded-[5px] border border-[#dbe0e5] bg-white p-2.5 text-[#063b7c] no-underline max-[1024px]:mb-2 max-[1024px]:min-h-[47px] max-[1024px]:p-2"
+                      href="#attention"
+                      key={title}
+                    >
+                      <span className={`w-5 text-center text-[13px] ${color}`}>
+                        <span className="material-symbols-outlined text-[18px]">
+                          {icon}
+                        </span>
                       </span>
-                    </span>
-                    <strong className="flex-1 text-[10px] max-[1024px]:text-[8px]">
-                      {title}
-                      <small className="mt-1 block text-[9px] font-normal text-[#8a929a] max-[1024px]:text-[7px]">
-                        {note}
-                      </small>
-                    </strong>
-                    <b className="material-symbols-outlined text-[17px] font-normal text-[#a6adb3]">
-                      chevron_right
-                    </b>
-                  </a>
-                ))}
+                      <strong className="flex-1 text-[10px] max-[1024px]:text-[8px]">
+                        {title}
+                        <small className="mt-1 block text-[9px] font-normal text-[#8a929a] max-[1024px]:text-[7px]">
+                          {note}
+                        </small>
+                      </strong>
+                      <b className="material-symbols-outlined text-[17px] font-normal text-[#a6adb3]">
+                        chevron_right
+                      </b>
+                    </a>
+                  ))
+                )}
               </div>
               <div className="mt-5 border-t border-[#d2d9e0]" />
             </aside>

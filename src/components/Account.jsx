@@ -3,7 +3,13 @@ import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { callAuthFunction } from "../lib/auth.js";
 
-const roles = ["Admin", "Service Manager", "Warehouse Manager", "Technician", "Billing Staff"];
+const roles = [
+  "Admin",
+  "Service Manager",
+  "Warehouse Manager",
+  "Technician",
+  "Billing Staff",
+];
 const branches = ["Makati", "Cebu"];
 const normalizeAccountRole = (account) =>
   account.role === "Sales Manager"
@@ -26,7 +32,8 @@ function Account() {
     let isMounted = true;
     callAuthFunction("list-users")
       .then(({ accounts: storedAccounts }) => {
-        if (isMounted) setAccounts((storedAccounts || []).map(normalizeAccountRole));
+        if (isMounted)
+          setAccounts((storedAccounts || []).map(normalizeAccountRole));
       })
       .catch((error) => {
         if (isMounted) setFormError(error.message);
@@ -47,7 +54,10 @@ function Account() {
 
   const handleApproveReset = () => {
     const approvedRequest = { ...resetRequest, status: "approved" };
-    localStorage.setItem("passwordResetRequest", JSON.stringify(approvedRequest));
+    localStorage.setItem(
+      "passwordResetRequest",
+      JSON.stringify(approvedRequest),
+    );
     setResetRequest(approvedRequest);
   };
 
@@ -77,7 +87,10 @@ function Account() {
         branch,
         password: formData.get("password"),
       });
-      setAccounts((currentAccounts) => [normalizeAccountRole(account), ...currentAccounts]);
+      setAccounts((currentAccounts) => [
+        normalizeAccountRole(account),
+        ...currentAccounts,
+      ]);
       setFormError("");
       setSuccessMessage(`Account created for ${name}.`);
       form.reset();
@@ -88,13 +101,20 @@ function Account() {
   };
 
   const handleDeleteAccount = async (account) => {
-    if (!window.confirm(`Remove ${account.name} from the active user directory?`)) return;
+    if (
+      !window.confirm(`Remove ${account.name} from the active user directory?`)
+    )
+      return;
     setDeletingAccountId(account.id);
     setFormError("");
     setSuccessMessage("");
     try {
       await callAuthFunction("delete-user", { userId: account.id });
-      setAccounts((currentAccounts) => currentAccounts.filter((currentAccount) => currentAccount.id !== account.id));
+      setAccounts((currentAccounts) =>
+        currentAccounts.filter(
+          (currentAccount) => currentAccount.id !== account.id,
+        ),
+      );
       setSuccessMessage(`${account.name} was removed from the user directory.`);
     } catch (error) {
       setFormError(error.message);
@@ -303,14 +323,26 @@ function Account() {
                       required
                     />
                     <button
-                      aria-label={showTemporaryPassword ? "Hide password" : "Show password"}
+                      aria-label={
+                        showTemporaryPassword
+                          ? "Hide password"
+                          : "Show password"
+                      }
                       className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center border-0 bg-transparent p-0 text-[#6f7f91] transition-colors hover:text-[#14519f]"
-                      onClick={() => setShowTemporaryPassword((isVisible) => !isVisible)}
-                      title={showTemporaryPassword ? "Hide password" : "Show password"}
+                      onClick={() =>
+                        setShowTemporaryPassword((isVisible) => !isVisible)
+                      }
+                      title={
+                        showTemporaryPassword
+                          ? "Hide password"
+                          : "Show password"
+                      }
                       type="button"
                     >
                       <span className="material-symbols-outlined text-[18px] leading-none">
-                        {showTemporaryPassword ? "visibility" : "visibility_off"}
+                        {showTemporaryPassword
+                          ? "visibility"
+                          : "visibility_off"}
                       </span>
                     </button>
                   </div>
@@ -431,8 +463,12 @@ function Account() {
                         className="inline-flex items-center justify-center gap-1 rounded-[6px] border border-[#f0b8b0] bg-[#fff7f5] px-2.5 py-1.5 text-[10px] font-bold text-[#b64132] transition-colors hover:bg-[#fff0ec] disabled:cursor-wait disabled:opacity-60 max-[620px]:col-start-2 max-[620px]:row-start-2"
                         title="Remove user"
                       >
-                        <span className="material-symbols-outlined text-[15px]">person_remove</span>
-                        {deletingAccountId === account.id ? "Removing..." : "Remove"}
+                        <span className="material-symbols-outlined text-[15px]">
+                          person_remove
+                        </span>
+                        {deletingAccountId === account.id
+                          ? "Removing..."
+                          : "Remove"}
                       </button>
                     </article>
                   ))}

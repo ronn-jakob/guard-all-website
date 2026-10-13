@@ -13,7 +13,10 @@ function ForgotPassword() {
 
   const handleRequest = (event) => {
     event.preventDefault();
-    const email = new FormData(event.currentTarget).get("email").trim().toLowerCase();
+    const email = new FormData(event.currentTarget)
+      .get("email")
+      .trim()
+      .toLowerCase();
     const nextRequest = {
       email,
       status: "pending",
@@ -91,7 +94,8 @@ function ForgotPassword() {
               Waiting for approval
             </h2>
             <p className="mb-0 mt-2 text-[12px] leading-relaxed text-[#718090]">
-              The administrator must approve the request before you can create a new password.
+              The administrator must approve the request before you can create a
+              new password.
             </p>
           </div>
         )}
@@ -131,12 +135,18 @@ function ForgotPassword() {
         )}
 
         {message && (
-          <p className="mt-4 rounded-[6px] border border-[#a8dfb7] bg-[#effaf2] px-3 py-2 text-center text-[12px] text-[#267340]" role="status">
+          <p
+            className="mt-4 rounded-[6px] border border-[#a8dfb7] bg-[#effaf2] px-3 py-2 text-center text-[12px] text-[#267340]"
+            role="status"
+          >
             {message}
           </p>
         )}
         {error && (
-          <p className="mt-4 rounded-[6px] border border-[#f0b8b0] bg-[#fff1ee] px-3 py-2 text-center text-[12px] text-[#b64132]" role="alert">
+          <p
+            className="mt-4 rounded-[6px] border border-[#f0b8b0] bg-[#fff1ee] px-3 py-2 text-center text-[12px] text-[#b64132]"
+            role="alert"
+          >
             {error}
           </p>
         )}

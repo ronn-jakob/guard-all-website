@@ -56,13 +56,16 @@ function Scheduling() {
   const confirmedAssignmentsKey = `confirmed-schedule-assignments:${sessionUser?.id ?? "unknown"}`;
   const [confirmedAssignments, setConfirmedAssignments] = useState(() => {
     try {
-      const storedAssignments = JSON.parse(localStorage.getItem(confirmedAssignmentsKey) || "[]");
+      const storedAssignments = JSON.parse(
+        localStorage.getItem(confirmedAssignmentsKey) || "[]",
+      );
       return new Set(Array.isArray(storedAssignments) ? storedAssignments : []);
     } catch {
       return new Set();
     }
   });
-  const defaultBranch = getSession()?.user?.branch === "cebu" ? "Cebu" : "Makati";
+  const defaultBranch =
+    getSession()?.user?.branch === "cebu" ? "Cebu" : "Makati";
   const navigate = useNavigate();
   // State to manage active view mode ('list' | 'calendar')
   const [viewMode, setViewMode] = useState("list");
@@ -79,20 +82,26 @@ function Scheduling() {
         const nextDates = Object.fromEntries(
           schedules.map((job) => [job.order, new Date(`${job.date}T00:00:00`)]),
         );
-        setSchedule(schedules.map((job) => [
-          job.time,
-          job.dayLabel,
-          job.client,
-          job.order,
-          job.service,
-          job.location,
-          job.technician,
-          job.stock,
-          job.technicians,
-        ]));
+        setSchedule(
+          schedules.map((job) => [
+            job.time,
+            job.dayLabel,
+            job.client,
+            job.order,
+            job.service,
+            job.location,
+            job.technician,
+            job.stock,
+            job.technicians,
+          ]),
+        );
         setScheduledJobDates(nextDates);
-        const lastConfirmedOrder = localStorage.getItem(`${confirmedAssignmentsKey}:last`);
-        const lastConfirmedJob = schedules.find((job) => job.order === lastConfirmedOrder);
+        const lastConfirmedOrder = localStorage.getItem(
+          `${confirmedAssignmentsKey}:last`,
+        );
+        const lastConfirmedJob = schedules.find(
+          (job) => job.order === lastConfirmedOrder,
+        );
         if (lastConfirmedJob) {
           const confirmedDate = nextDates[lastConfirmedJob.order];
           setSelectedOrder(lastConfirmedJob.order);
@@ -110,7 +119,9 @@ function Scheduling() {
 
   useEffect(() => {
     let isMounted = true;
-    callAuthFunction("list-technicians", { date: getDateKey(selectedCalendarDate) })
+    callAuthFunction("list-technicians", {
+      date: getDateKey(selectedCalendarDate),
+    })
       .then(({ technicians: availableTechnicians }) => {
         if (isMounted) setTechnicianOptions(availableTechnicians || []);
       })
@@ -173,7 +184,8 @@ function Scheduling() {
   );
   const selectedDayJobs = schedule.filter(
     (job) =>
-      getDateKey(scheduledJobDates[job[3]]) === getDateKey(selectedCalendarDate),
+      getDateKey(scheduledJobDates[job[3]]) ===
+      getDateKey(selectedCalendarDate),
   );
   const scheduledJobsInCalendarMonth = schedule.filter((job) => {
     const jobDate = scheduledJobDates[job[3]];
@@ -214,8 +226,8 @@ function Scheduling() {
     }
   }
 
-  const selectedJob =
-    schedule.find((job) => job[3] === selectedOrder) ?? schedule[0] ?? [
+  const selectedJob = schedule.find((job) => job[3] === selectedOrder) ??
+    schedule[0] ?? [
       "--:--",
       "",
       "No scheduled jobs",
@@ -232,7 +244,10 @@ function Scheduling() {
     const nextConfirmedAssignments = new Set(confirmedAssignments);
     nextConfirmedAssignments.add(order);
     setConfirmedAssignments(nextConfirmedAssignments);
-    localStorage.setItem(confirmedAssignmentsKey, JSON.stringify([...nextConfirmedAssignments]));
+    localStorage.setItem(
+      confirmedAssignmentsKey,
+      JSON.stringify([...nextConfirmedAssignments]),
+    );
     localStorage.setItem(`${confirmedAssignmentsKey}:last`, order);
     navigate(`/reports/new?job=${encodeURIComponent(order)}`);
   }
@@ -260,19 +275,24 @@ function Scheduling() {
       });
       const { schedules } = await callAuthFunction("list-schedules");
       const nextDates = Object.fromEntries(
-        (schedules || []).map((job) => [job.order, new Date(`${job.date}T00:00:00`)]),
+        (schedules || []).map((job) => [
+          job.order,
+          new Date(`${job.date}T00:00:00`),
+        ]),
       );
-      setSchedule((schedules || []).map((job) => [
-        job.time,
-        job.dayLabel,
-        job.client,
-        job.order,
-        job.service,
-        job.location,
-        job.technician,
-        job.stock,
-        job.technicians,
-      ]));
+      setSchedule(
+        (schedules || []).map((job) => [
+          job.time,
+          job.dayLabel,
+          job.client,
+          job.order,
+          job.service,
+          job.location,
+          job.technician,
+          job.stock,
+          job.technicians,
+        ]),
+      );
       setScheduledJobDates(nextDates);
       setTechnicians([""]);
       setIsCreateJobOpen(false);
@@ -289,14 +309,23 @@ function Scheduling() {
     const endDate = new Date(2026, 0, 1, hours + 1, minutes);
     setEditValues({
       order: selectedJob[3],
-      serviceType: selectedJob[4] === "Preventive maintenance" ? "Preventive maintenance" : selectedJob[4] === "Installation" ? "Installation" : "Service call",
-      date: getDateKey(scheduledJobDates[selectedJob[3]] || selectedCalendarDate),
+      serviceType:
+        selectedJob[4] === "Preventive maintenance"
+          ? "Preventive maintenance"
+          : selectedJob[4] === "Installation"
+            ? "Installation"
+            : "Service call",
+      date: getDateKey(
+        scheduledJobDates[selectedJob[3]] || selectedCalendarDate,
+      ),
       startTime,
       endTime: `${String(endDate.getHours()).padStart(2, "0")}:${String(endDate.getMinutes()).padStart(2, "0")}`,
       branch: selectedJob[5]?.split(" - ")[0] || defaultBranch,
     });
     setEditTechnicians(
-      selectedJob[8]?.length ? selectedJob[8].map((technician) => technician.id) : [""],
+      selectedJob[8]?.length
+        ? selectedJob[8].map((technician) => technician.id)
+        : [""],
     );
     setFormError("");
     setIsEditJobOpen(true);
@@ -319,9 +348,24 @@ function Scheduling() {
       });
       const { schedules } = await callAuthFunction("list-schedules");
       const nextDates = Object.fromEntries(
-        (schedules || []).map((job) => [job.order, new Date(`${job.date}T00:00:00`)]),
+        (schedules || []).map((job) => [
+          job.order,
+          new Date(`${job.date}T00:00:00`),
+        ]),
       );
-      setSchedule((schedules || []).map((job) => [job.time, job.dayLabel, job.client, job.order, job.service, job.location, job.technician, job.stock, job.technicians]));
+      setSchedule(
+        (schedules || []).map((job) => [
+          job.time,
+          job.dayLabel,
+          job.client,
+          job.order,
+          job.service,
+          job.location,
+          job.technician,
+          job.stock,
+          job.technicians,
+        ]),
+      );
       setScheduledJobDates(nextDates);
       setSelectedCalendarDate(new Date(`${formData.get("date")}T00:00:00`));
       setIsEditJobOpen(false);
@@ -489,9 +533,7 @@ function Scheduling() {
                                   </span>
                                   {technician}
                                 </span>
-                                <span
-                                  className="truncate text-[#5e8e70]"
-                                >
+                                <span className="truncate text-[#5e8e70]">
                                   <span className="material-symbols-outlined mr-0.5 align-middle text-[14px]">
                                     inventory_2
                                   </span>
@@ -525,7 +567,12 @@ function Scheduling() {
                       )}
                       {calendarDays.map((date, index) => {
                         if (!date) {
-                          return <div key={`empty-${index}`} className="bg-[#f8fbff]" />;
+                          return (
+                            <div
+                              key={`empty-${index}`}
+                              className="bg-[#f8fbff]"
+                            />
+                          );
                         }
 
                         const jobsOnDate = schedule.filter(
@@ -557,7 +604,8 @@ function Scheduling() {
                             </span>
                             {jobsOnDate.length > 0 && (
                               <span className="mt-auto truncate rounded bg-[#1250a0]/10 px-1 py-0.5 text-[8px] font-bold text-[#1250a0] max-[620px]:text-[7px] max-[620px]:px-0.5">
-                                {jobsOnDate.length} {jobsOnDate.length === 1 ? "Job" : "Jobs"}
+                                {jobsOnDate.length}{" "}
+                                {jobsOnDate.length === 1 ? "Job" : "Jobs"}
                               </span>
                             )}
                           </button>
@@ -571,32 +619,41 @@ function Scheduling() {
                           Jobs on {formatSelectedDate(selectedCalendarDate)}
                         </h3>
                         <span className="text-[10px] font-semibold text-[#7f8992]">
-                          {selectedDayJobs.length} {selectedDayJobs.length === 1 ? "job" : "jobs"}
+                          {selectedDayJobs.length}{" "}
+                          {selectedDayJobs.length === 1 ? "job" : "jobs"}
                         </span>
                       </div>
                       {selectedDayJobs.length > 0 ? (
                         <div className="mt-2 divide-y divide-[#e5e8eb]">
-                          {selectedDayJobs.map(([time, , client, order, service]) => (
-                            <button
-                              key={order}
-                              type="button"
-                              onClick={() => setSelectedOrder(order)}
-                              className={`flex w-full items-center gap-3 py-2 text-left ${
-                                selectedOrder === order ? "text-[#1250a0]" : "text-[#45515c]"
-                              }`}
-                            >
-                              <strong className="w-11 flex-none text-[11px]">{time}</strong>
-                              <span className="min-w-0 flex-1">
-                                <strong className="block truncate text-[11px]">{client}</strong>
-                                <span className="block truncate text-[10px] text-[#89939b]">
-                                  {service} · {order}
+                          {selectedDayJobs.map(
+                            ([time, , client, order, service]) => (
+                              <button
+                                key={order}
+                                type="button"
+                                onClick={() => setSelectedOrder(order)}
+                                className={`flex w-full items-center gap-3 py-2 text-left ${
+                                  selectedOrder === order
+                                    ? "text-[#1250a0]"
+                                    : "text-[#45515c]"
+                                }`}
+                              >
+                                <strong className="w-11 flex-none text-[11px]">
+                                  {time}
+                                </strong>
+                                <span className="min-w-0 flex-1">
+                                  <strong className="block truncate text-[11px]">
+                                    {client}
+                                  </strong>
+                                  <span className="block truncate text-[10px] text-[#89939b]">
+                                    {service} · {order}
+                                  </span>
                                 </span>
-                              </span>
-                              <span className="material-symbols-outlined text-[17px] text-[#a6afb8]">
-                                chevron_right
-                              </span>
-                            </button>
-                          ))}
+                                <span className="material-symbols-outlined text-[17px] text-[#a6afb8]">
+                                  chevron_right
+                                </span>
+                              </button>
+                            ),
+                          )}
                         </div>
                       ) : (
                         <p className="m-0 mt-2 text-[11px] text-[#89939b]">
@@ -637,11 +694,17 @@ function Scheduling() {
                       aria-label="Edit selected work order"
                       title="Edit selected work order"
                     >
-                      <span className="material-symbols-outlined text-[17px]">edit</span>
+                      <span className="material-symbols-outlined text-[17px]">
+                        edit
+                      </span>
                     </button>
                   )}
                   <span className="rounded-[6px] bg-white px-3 py-2 text-[9px] text-[#6d879f] shadow-sm">
-                    {scheduledJobDates[selectedJob[3]] ? formatSelectedDate(scheduledJobDates[selectedJob[3]]).split(",")[0].toUpperCase() : "SCHEDULED"}
+                    {scheduledJobDates[selectedJob[3]]
+                      ? formatSelectedDate(scheduledJobDates[selectedJob[3]])
+                          .split(",")[0]
+                          .toUpperCase()
+                      : "SCHEDULED"}
                   </span>
                 </div>
               </div>
@@ -674,7 +737,9 @@ function Scheduling() {
                 <span className="material-symbols-outlined text-[18px]">
                   check
                 </span>
-                {confirmedAssignments.has(selectedJob[3]) ? "Open field report" : "Confirm assignment"}
+                {confirmedAssignments.has(selectedJob[3])
+                  ? "Open field report"
+                  : "Confirm assignment"}
               </button>
             </aside>
           </div>
@@ -683,7 +748,6 @@ function Scheduling() {
             Guard-All Electronic Security Systems, Inc.
           </footer>
         </div>
-
       </section>
 
       {isEditJobOpen && (
@@ -693,19 +757,51 @@ function Scheduling() {
             if (event.target === event.currentTarget) setIsEditJobOpen(false);
           }}
         >
-          <section role="dialog" aria-labelledby="edit-job-title" className="w-full max-w-[560px] rounded-[14px] border border-[#263c5a] bg-[#172a44] p-6 text-[#e5edf8] shadow-[0_24px_80px_rgb(0_0_0_/_45%)]">
+          <section
+            role="dialog"
+            aria-labelledby="edit-job-title"
+            className="w-full max-w-[560px] rounded-[14px] border border-[#263c5a] bg-[#172a44] p-6 text-[#e5edf8] shadow-[0_24px_80px_rgb(0_0_0_/_45%)]"
+          >
             <div className="flex items-start justify-between gap-4">
               <div>
-                <p className="m-0 text-[11px] font-semibold uppercase tracking-[.1em] text-[#91a8c7]">{editValues.order}</p>
-                <h2 id="edit-job-title" className="m-0 mt-1 text-[23px] font-bold text-white">Edit scheduled job</h2>
+                <p className="m-0 text-[11px] font-semibold uppercase tracking-[.1em] text-[#91a8c7]">
+                  {editValues.order}
+                </p>
+                <h2
+                  id="edit-job-title"
+                  className="m-0 mt-1 text-[23px] font-bold text-white"
+                >
+                  Edit scheduled job
+                </h2>
               </div>
-              <button type="button" onClick={() => setIsEditJobOpen(false)} className="grid h-8 w-8 place-items-center text-[25px] text-[#91a8c7] hover:text-white">×</button>
+              <button
+                type="button"
+                onClick={() => setIsEditJobOpen(false)}
+                className="grid h-8 w-8 place-items-center text-[25px] text-[#91a8c7] hover:text-white"
+              >
+                ×
+              </button>
             </div>
             <form className="mt-5 grid gap-4" onSubmit={handleEditJob}>
-              <input type="hidden" name="order" value={editValues.order || ""} readOnly />
+              <input
+                type="hidden"
+                name="order"
+                value={editValues.order || ""}
+                readOnly
+              />
               <label className="text-[13px] font-medium text-[#a9bfd9]">
                 Service type
-                <select name="serviceType" value={editValues.serviceType || ""} onChange={(event) => setEditValues((current) => ({ ...current, serviceType: event.target.value }))} className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]">
+                <select
+                  name="serviceType"
+                  value={editValues.serviceType || ""}
+                  onChange={(event) =>
+                    setEditValues((current) => ({
+                      ...current,
+                      serviceType: event.target.value,
+                    }))
+                  }
+                  className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
+                >
                   <option>Service call</option>
                   <option>Preventive maintenance</option>
                   <option>Installation</option>
@@ -714,11 +810,33 @@ function Scheduling() {
               <div className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
                 <label className="text-[13px] font-medium text-[#a9bfd9]">
                   Date
-                  <input required type="date" name="date" value={editValues.date || ""} onChange={(event) => setEditValues((current) => ({ ...current, date: event.target.value }))} className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]" />
+                  <input
+                    required
+                    type="date"
+                    name="date"
+                    value={editValues.date || ""}
+                    onChange={(event) =>
+                      setEditValues((current) => ({
+                        ...current,
+                        date: event.target.value,
+                      }))
+                    }
+                    className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
+                  />
                 </label>
                 <label className="text-[13px] font-medium text-[#a9bfd9]">
                   Branch
-                  <select name="branch" value={editValues.branch || defaultBranch} onChange={(event) => setEditValues((current) => ({ ...current, branch: event.target.value }))} className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]">
+                  <select
+                    name="branch"
+                    value={editValues.branch || defaultBranch}
+                    onChange={(event) =>
+                      setEditValues((current) => ({
+                        ...current,
+                        branch: event.target.value,
+                      }))
+                    }
+                    className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
+                  >
                     <option>Makati</option>
                     <option>Cebu</option>
                   </select>
@@ -727,19 +845,47 @@ function Scheduling() {
               <div className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
                 <label className="text-[13px] font-medium text-[#a9bfd9]">
                   Start time
-                  <input required type="time" name="startTime" value={editValues.startTime || ""} onChange={(event) => setEditValues((current) => ({ ...current, startTime: event.target.value }))} className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]" />
+                  <input
+                    required
+                    type="time"
+                    name="startTime"
+                    value={editValues.startTime || ""}
+                    onChange={(event) =>
+                      setEditValues((current) => ({
+                        ...current,
+                        startTime: event.target.value,
+                      }))
+                    }
+                    className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
+                  />
                 </label>
                 <label className="text-[13px] font-medium text-[#a9bfd9]">
                   End time
-                  <input required type="time" name="endTime" value={editValues.endTime || ""} onChange={(event) => setEditValues((current) => ({ ...current, endTime: event.target.value }))} className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]" />
+                  <input
+                    required
+                    type="time"
+                    name="endTime"
+                    value={editValues.endTime || ""}
+                    onChange={(event) =>
+                      setEditValues((current) => ({
+                        ...current,
+                        endTime: event.target.value,
+                      }))
+                    }
+                    className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
+                  />
                 </label>
               </div>
               <fieldset className="border-0 p-0">
                 <div className="flex items-center justify-between gap-3">
-                  <legend className="text-[13px] font-medium text-[#a9bfd9]">Assign technicians</legend>
+                  <legend className="text-[13px] font-medium text-[#a9bfd9]">
+                    Assign technicians
+                  </legend>
                   <button
                     type="button"
-                    onClick={() => setEditTechnicians((current) => [...current, ""])}
+                    onClick={() =>
+                      setEditTechnicians((current) => [...current, ""])
+                    }
                     className="rounded-[6px] border border-[#4d88e8] px-3 py-2 text-[11px] font-semibold text-[#9fc4ff] hover:bg-[#1d3351]"
                   >
                     + Add technician
@@ -747,25 +893,48 @@ function Scheduling() {
                 </div>
                 <div className="mt-2 grid gap-2">
                   {editTechnicians.map((technicianId, index) => {
-                    const assignedTechnician = selectedJob[8]?.find((technician) => technician.id === technicianId);
+                    const assignedTechnician = selectedJob[8]?.find(
+                      (technician) => technician.id === technicianId,
+                    );
                     const options = [
                       ...editTechnicianOptions,
-                      ...(assignedTechnician && !editTechnicianOptions.some((option) => option.id === technicianId)
+                      ...(assignedTechnician &&
+                      !editTechnicianOptions.some(
+                        (option) => option.id === technicianId,
+                      )
                         ? [{ ...assignedTechnician, unavailable: true }]
                         : []),
                     ];
                     return (
-                      <div className="flex items-center gap-2" key={`edit-technician-${index}`}>
+                      <div
+                        className="flex items-center gap-2"
+                        key={`edit-technician-${index}`}
+                      >
                         <select
                           name="technicians"
                           value={technicianId}
-                          onChange={(event) => setEditTechnicians((current) => current.map((value, currentIndex) => currentIndex === index ? event.target.value : value))}
+                          onChange={(event) =>
+                            setEditTechnicians((current) =>
+                              current.map((value, currentIndex) =>
+                                currentIndex === index
+                                  ? event.target.value
+                                  : value,
+                              ),
+                            )
+                          }
                           className="h-11 min-w-0 flex-1 rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
                         >
                           <option value="">Select a technician</option>
                           {options.map((option) => (
-                            <option key={option.id} value={option.id} disabled={option.unavailable}>
-                              {option.name}{option.unavailable ? " (unavailable on this date)" : ""}
+                            <option
+                              key={option.id}
+                              value={option.id}
+                              disabled={option.unavailable}
+                            >
+                              {option.name}
+                              {option.unavailable
+                                ? " (unavailable on this date)"
+                                : ""}
                             </option>
                           ))}
                         </select>
@@ -773,10 +942,18 @@ function Scheduling() {
                           <button
                             type="button"
                             aria-label={`Remove technician ${index + 1}`}
-                            onClick={() => setEditTechnicians((current) => current.filter((_, currentIndex) => currentIndex !== index))}
+                            onClick={() =>
+                              setEditTechnicians((current) =>
+                                current.filter(
+                                  (_, currentIndex) => currentIndex !== index,
+                                ),
+                              )
+                            }
                             className="grid h-10 w-10 flex-none place-items-center rounded-[6px] text-[#91a8c7] hover:bg-[#1d3351] hover:text-white"
                           >
-                            <span className="material-symbols-outlined text-[20px]">delete</span>
+                            <span className="material-symbols-outlined text-[20px]">
+                              delete
+                            </span>
                           </button>
                         )}
                       </div>
@@ -784,10 +961,29 @@ function Scheduling() {
                   })}
                 </div>
               </fieldset>
-              {formError && <p className="m-0 rounded-[6px] border border-[#8f3e3a] bg-[#3c2229] px-3 py-2 text-[12px] text-[#ffb3a8]" role="alert">{formError}</p>}
+              {formError && (
+                <p
+                  className="m-0 rounded-[6px] border border-[#8f3e3a] bg-[#3c2229] px-3 py-2 text-[12px] text-[#ffb3a8]"
+                  role="alert"
+                >
+                  {formError}
+                </p>
+              )}
               <div className="flex justify-end gap-3 border-t border-[#293d58] pt-4">
-                <button type="button" onClick={() => setIsEditJobOpen(false)} className="rounded-[8px] border border-[#293f5d] px-4 py-2 text-[13px] text-[#e5edf8] hover:bg-[#1d3351]">Cancel</button>
-                <button type="submit" disabled={isSaving} className="rounded-[8px] bg-[#4d88e8] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#5b96f4]">{isSaving ? "Saving..." : "Save changes"}</button>
+                <button
+                  type="button"
+                  onClick={() => setIsEditJobOpen(false)}
+                  className="rounded-[8px] border border-[#293f5d] px-4 py-2 text-[13px] text-[#e5edf8] hover:bg-[#1d3351]"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSaving}
+                  className="rounded-[8px] bg-[#4d88e8] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#5b96f4]"
+                >
+                  {isSaving ? "Saving..." : "Save changes"}
+                </button>
               </div>
             </form>
           </section>
@@ -880,7 +1076,7 @@ function Scheduling() {
                   />
                 </label>
               </div>
-              
+
               <label className="mb-4 block text-[14px] font-medium text-[#a9bfd9]">
                 Address <span className="text-[#ff6557]">*</span>
                 <input
@@ -915,7 +1111,6 @@ function Scheduling() {
                 </label>
               </div>
 
-
               <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
                 <label className="col-span-2 text-[14px] font-medium text-[#a9bfd9] max-[620px]:col-span-1">
                   Service type <span className="text-[#ff6557]">*</span>
@@ -931,7 +1126,7 @@ function Scheduling() {
                   </select>
                 </label>
               </div>
-              
+
               <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:gap-3">
                 <label className="text-[14px] font-medium text-[#a9bfd9]">
                   Date <span className="text-[#ff6557]">*</span>
@@ -984,11 +1179,16 @@ function Scheduling() {
               <fieldset className="border-0 p-0">
                 <div className="flex items-center justify-between gap-3">
                   <legend className="text-[14px] font-medium text-[#a9bfd9]">
-                    Assign technicians <span className="text-[12px] text-[#7188a4]">(optional)</span>
+                    Assign technicians{" "}
+                    <span className="text-[12px] text-[#7188a4]">
+                      (optional)
+                    </span>
                   </legend>
                   <button
                     type="button"
-                    onClick={() => setTechnicians((current) => [...current, ""])}
+                    onClick={() =>
+                      setTechnicians((current) => [...current, ""])
+                    }
                     className="rounded-[8px] border border-[#4d88e8] px-3 py-2 text-[12px] font-semibold text-[#9fc4ff] hover:bg-[#1d3351]"
                   >
                     + Add technician
@@ -997,14 +1197,19 @@ function Scheduling() {
 
                 <div className="mt-2 grid gap-2">
                   {technicians.map((technician, index) => (
-                    <div className="flex items-center gap-2" key={`technician-${index}`}>
+                    <div
+                      className="flex items-center gap-2"
+                      key={`technician-${index}`}
+                    >
                       <select
                         name="technicians"
                         value={technician}
                         onChange={(event) =>
                           setTechnicians((current) =>
                             current.map((value, currentIndex) =>
-                              currentIndex === index ? event.target.value : value,
+                              currentIndex === index
+                                ? event.target.value
+                                : value,
                             ),
                           )
                         }
@@ -1023,7 +1228,9 @@ function Scheduling() {
                           aria-label={`Remove technician ${index + 1}`}
                           onClick={() =>
                             setTechnicians((current) =>
-                              current.filter((_, currentIndex) => currentIndex !== index),
+                              current.filter(
+                                (_, currentIndex) => currentIndex !== index,
+                              ),
                             )
                           }
                           className="grid h-10 w-10 flex-none place-items-center rounded-[8px] text-[#91a8c7] hover:bg-[#1d3351] hover:text-white"
@@ -1038,7 +1245,10 @@ function Scheduling() {
                 </div>
               </fieldset>
               {formError && (
-                <p className="mb-5 mt-3 rounded-[6px] border border-[#8f3e3a] bg-[#3c2229] px-3 py-2 text-[12px] text-[#ffb3a8]" role="alert">
+                <p
+                  className="mb-5 mt-3 rounded-[6px] border border-[#8f3e3a] bg-[#3c2229] px-3 py-2 text-[12px] text-[#ffb3a8]"
+                  role="alert"
+                >
                   {formError}
                 </p>
               )}

@@ -20,7 +20,7 @@ function TopBar() {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
         setIsOpen(false);
       }
-    }
+    } 
 
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
@@ -30,7 +30,7 @@ function TopBar() {
 
   const handleMarkAllRead = () => {
     setNotifications((prev) =>
-      prev.map((item) => ({ ...item, unread: false }))
+      prev.map((item) => ({ ...item, unread: false })),
     );
   };
 
