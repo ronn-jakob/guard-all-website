@@ -19,6 +19,7 @@ function FieldReports() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [attachedImages, setAttachedImages] = useState([]);
+  const [usedParts, setUsedParts] = useState({});
   const [formValues, setFormValues] = useState({
     clientName: "",
     jobNumber: "",
@@ -33,9 +34,6 @@ function FieldReports() {
     additionalNotes: "",
     clientSignoff: false,
     clientSignoffName: "",
-    partSku: "",
-    partDescription: "",
-    partQuantity: "1",
   });
 
   useEffect(() => {
@@ -62,6 +60,14 @@ function FieldReports() {
     setSelectedJob(job);
     setSubmitError("");
     setAttachedImages([]);
+    setUsedParts(
+      Object.fromEntries(
+        (job.reservedParts || []).map((part) => [part.jobPartId, {
+          selected: false,
+          quantity: "1",
+        }]),
+      ),
+    );
     setFormValues((currentValues) => ({
       ...currentValues,
       clientName: job.clientName,
@@ -76,6 +82,13 @@ function FieldReports() {
 
   function updateField(field, value) {
     setFormValues((currentValues) => ({ ...currentValues, [field]: value }));
+  }
+
+  function updateUsedPart(jobPartId, updates) {
+    setUsedParts((currentParts) => ({
+      ...currentParts,
+      [jobPartId]: { ...currentParts[jobPartId], ...updates },
+    }));
   }
 
   function handleImageSelection(event) {
@@ -111,9 +124,25 @@ function FieldReports() {
   async function handleSubmitReport() {
     if (!selectedJob) return;
 
-    const partSku = String(formValues.partSku ?? "").trim();
-    const partDescription = String(formValues.partDescription ?? "").trim();
-    const partQuantity = Number(formValues.partQuantity ?? 0);
+    const partsUsed = (selectedJob.reservedParts || [])
+      .filter((part) => usedParts[part.jobPartId]?.selected)
+      .map((part) => ({
+        jobPartId: part.jobPartId,
+        quantity: Number(usedParts[part.jobPartId].quantity),
+      }));
+    const hasInvalidPartQuantity = partsUsed.some(
+      (partUsed) =>
+        !Number.isInteger(partUsed.quantity) ||
+        partUsed.quantity < 1 ||
+        partUsed.quantity >
+          selectedJob.reservedParts.find(
+            (part) => part.jobPartId === partUsed.jobPartId,
+          ).quantity,
+    );
+    if (hasInvalidPartQuantity) {
+      setSubmitError("Enter a valid used quantity for each selected part.");
+      return;
+    }
 
     if (
       !formValues.workPerformed ||
@@ -146,18 +175,7 @@ function FieldReports() {
         additionalNotes: formValues.additionalNotes,
         clientSignoff: formValues.clientSignoff,
         clientSignoffName: formValues.clientSignoffName,
-        parts: partSku
-          ? [
-              {
-                sku: partSku,
-                description: partDescription || partSku,
-                quantity:
-                  Number.isFinite(partQuantity) && partQuantity > 0
-                    ? partQuantity
-                    : 1,
-              },
-            ]
-          : [],
+        partsUsed,
         images: attachedImages
           .filter((image) => image && image.dataUrl)
           .map((image) => ({
@@ -378,49 +396,63 @@ function FieldReports() {
                   />
                 </section>
                 <section className={card}>
-                  <div className="flex items-center justify-between">
-                    <p className="m-0 text-[13px] font-bold text-[#68798a]">
-                      04 / PARTS USED
+                  <p className="m-0 text-[13px] font-bold text-[#68798a]">
+                    04 / RESERVED PARTS
+                  </p>
+                  {selectedJob.reservedParts?.length ? (
+                    <div className="mt-3 divide-y divide-[#e5ebf1]">
+                      {selectedJob.reservedParts.map((part) => (
+                        <div
+                          key={part.jobPartId}
+                          className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 py-2 text-[13px]"
+                        >
+                          <span className="min-w-0">
+                            <strong className="block truncate text-[#174f9a]">
+                              {part.name}
+                            </strong>
+                            <small className="text-[#778593]">{part.sku}</small>
+                          </span>
+                          <label className="flex items-center gap-2 text-[11px] font-semibold text-[#607286]">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(usedParts[part.jobPartId]?.selected)}
+                              aria-label={`Mark ${part.name} as used`}
+                              onChange={(event) =>
+                                updateUsedPart(part.jobPartId, {
+                                  selected: event.target.checked,
+                                })
+                              }
+                              className="h-4 w-4 rounded border-gray-300 text-[#1250a0] focus:ring-[#1250a0]"
+                            />
+                            Used
+                          </label>
+                          <input
+                            type="number"
+                            min="1"
+                            max={part.quantity}
+                            step="1"
+                            value={usedParts[part.jobPartId]?.quantity ?? "1"}
+                            disabled={!usedParts[part.jobPartId]?.selected}
+                            aria-label={`Quantity of ${part.name} used`}
+                            onChange={(event) =>
+                              updateUsedPart(part.jobPartId, {
+                                quantity: event.target.value,
+                              })
+                            }
+                            className={`${input} mt-0 h-9 w-[84px] px-2 text-center disabled:bg-[#f2f4f6]`}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mb-0 mt-3 text-[13px] text-[#778593]">
+                      No stock was reserved for this job.
                     </p>
-                    <button
-                      className="text-[12px] font-bold text-[#174f9a]"
-                      type="button"
-                    >
-                      + Add Part
-                    </button>
-                  </div>
-                  <div className="mt-3 grid grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)_minmax(56px,.65fr)] gap-2">
-                    <label className={label}>
-                      Part no.
-                      <input
-                        className={input}
-                        value={formValues.partSku || ""}
-                        onChange={(event) =>
-                          updateField("partSku", event.target.value)
-                        }
-                      />
-                    </label>
-                    <label className={label}>
-                      Description
-                      <input
-                        className={input}
-                        value={formValues.partDescription || ""}
-                        onChange={(event) =>
-                          updateField("partDescription", event.target.value)
-                        }
-                      />
-                    </label>
-                    <label className={label}>
-                      Qty
-                      <input
-                        className={input}
-                        value={formValues.partQuantity || ""}
-                        onChange={(event) =>
-                          updateField("partQuantity", event.target.value)
-                        }
-                      />
-                    </label>
-                  </div>
+                  )}
+                  <p className="mb-0 mt-2 text-[11px] text-[#8290a0]">
+                    Select the parts and quantities used. Unselected quantities
+                    are released when this report is submitted.
+                  </p>
                 </section>
                 <section className={card}>
                   <p className="m-0 text-[13px] font-bold text-[#68798a]">

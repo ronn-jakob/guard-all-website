@@ -11,10 +11,18 @@ import ForgotPassword from "./components/ForgotPassword.jsx";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { canAccessModule, getSession } from "./lib/auth.js";
 
-function ProtectedRoute({ module, disallowRole, children }) {
+function ProtectedRoute({ module, anyModule, disallowRole, children }) {
   const session = getSession();
   if (!session) return <Navigate replace to="/" />;
   if (module && !canAccessModule(module, session.user.role)) {
+    return <Navigate replace to="/dashboard" />;
+  }
+  if (
+    anyModule &&
+    !anyModule.some((allowedModule) =>
+      canAccessModule(allowedModule, session.user.role),
+    )
+  ) {
     return <Navigate replace to="/dashboard" />;
   }
   if (disallowRole && session.user.role === disallowRole) {
@@ -30,6 +38,7 @@ function App() {
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/scheduling" element={<ProtectedRoute module="scheduling"><Scheduling /></ProtectedRoute>} />
       <Route path="/inventory" element={<ProtectedRoute module="inventory"><Inventory /></ProtectedRoute>} />
+      <Route path="/inventory/allocate" element={<ProtectedRoute anyModule={["scheduling", "inventory"]}><Inventory /></ProtectedRoute>} />
       <Route path="/billing" element={<ProtectedRoute module="sales_billing"><SalesBilling /></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute disallowRole="Technician" module="field_reporting"><ReportsOverview /></ProtectedRoute>} />
       <Route path="/reports/new" element={<ProtectedRoute module="field_reporting"><FieldReports /></ProtectedRoute>} />

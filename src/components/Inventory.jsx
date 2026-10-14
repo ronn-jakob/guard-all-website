@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { callAuthFunction } from "../lib/auth.js";
@@ -13,6 +14,10 @@ function formatCurrency(value) {
 function mapInventoryRecord(row) {
   const part = row.parts;
   const quantity = Number(row.quantity_on_hand) || 0;
+  const quantityAvailable = Math.max(
+    0,
+    quantity - (Number(row.quantity_reserved) || 0),
+  );
   const minimum = Number(part.reorder_threshold) || 0;
   const unitPrice = Number(part.unit_cost) || 0;
   const statusName = quantity <= minimum ? "Low stock" : "In stock";
@@ -35,11 +40,23 @@ function mapInventoryRecord(row) {
     row.part_id,
     part.unit_of_measure,
     part.notes || "",
+    quantityAvailable,
   ];
 }
 
-async function fetchInventoryRecords() {
-  const result = await callAuthFunction("list-inventory");
+function isScheduleNearToday(dateValue) {
+  const [year, month, day] = String(dateValue).split("-").map(Number);
+  const scheduledDate = new Date(year, month - 1, day);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const daysUntilSchedule = Math.round(
+    (scheduledDate.getTime() - today.getTime()) / 86400000,
+  );
+  return Math.abs(daysUntilSchedule) <= 3;
+}
+
+async function fetchInventoryRecords(action = "list-inventory", payload = {}) {
+  const result = await callAuthFunction(action, payload);
   return (result.items || []).map(mapInventoryRecord);
 }
 
@@ -52,72 +69,18 @@ const categoryOptions = [
   "CCTV",
 ];
 
-const confirmedJobsData = [
-  {
-    id: "JOB #104",
-    branch: "CEBU",
-    title: "Cebu Branch, Room 813, Cebu City",
-    date: "Oct 16, 2026 · 9:00 AM · R. Villanueva",
-    status: "Confirmed",
-  },
-  {
-    id: "JOB #105",
-    branch: "MAKATI",
-    title: "Ayala Ave, Makati City",
-    date: "Oct 18, 2026 · 1:00 PM · M. Santos",
-    status: "Confirmed",
-  },
-];
-
-const pendingJobRequestsData = [
-  {
-    job: "Job #104",
-    status: "Confirmed",
-    location: "Cebu Branch, Room 813, Cebu City",
-    scheduled: "Oct 16, 2026 · 9:00 AM",
-    branch: "Cebu",
-    technician: "R. Villanueva",
-  },
-  {
-    job: "Job #105",
-    status: "Confirmed",
-    location: "Ayala Ave, Makati City",
-    scheduled: "Oct 18, 2026 · 1:00 PM",
-    branch: "Makati",
-    technician: "M. Santos",
-  },
-];
-
-const jobAllocationsHistoryData = [
-  {
-    date: "Oct 13, 2026",
-    job: "Job #105",
-    item: "Motion Sensor",
-    code: "DMP-001",
-    qtyIssued: 2,
-    technician: "M. Santos",
-  },
-  {
-    date: "Oct 13, 2026",
-    job: "Job #104",
-    item: "Door Contact",
-    code: "DMP-003",
-    qtyIssued: 1,
-    technician: "R. Villanueva",
-  },
-  {
-    date: "Oct 13, 2026",
-    job: "Job #104",
-    item: "Motion Sensor",
-    code: "DMP-001",
-    qtyIssued: 1,
-    technician: "R. Villanueva",
-  },
-];
-
 function Inventory() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const [searchParams] = useSearchParams();
+  const allocationJobNumber = searchParams.get("job");
+  const isAllocationRoute = pathname === "/inventory/allocate";
+  const isJobAllocation = Boolean(allocationJobNumber);
   const [inventoryRecords, setInventoryRecords] = useState([]);
+  const [allocationInventoryRecords, setAllocationInventoryRecords] = useState([]);
+  const [jobAllocation, setJobAllocation] = useState(null);
   const [isLoadingInventory, setIsLoadingInventory] = useState(true);
+  const [isAllocatingStock, setIsAllocatingStock] = useState(false);
   const [inventoryError, setInventoryError] = useState("");
   const [isCreateRequisition, setIsCreateRequisition] = useState(false);
   const [isAddNewItem, setIsAddNewItem] = useState(false);
@@ -136,14 +99,23 @@ function Inventory() {
   );
 
   // Navigation & Toggle States (Default to metrics view on reload)
-  const [activeTab, setActiveTab] = useState("Stock Ledger");
+  const [activeTab, setActiveTab] = useState(
+    isAllocationRoute ? "Pending Job Requests" : "Stock Ledger",
+  );
   const [showJobCards, setShowJobCards] = useState(false);
-  const [selectedJobId, setSelectedJobId] = useState("JOB #104");
+  const [selectedJobId, setSelectedJobId] = useState("");
   const [selectedItems, setSelectedItems] = useState({});
   const [issueQuantities, setIssueQuantities] = useState({});
+  const [pendingJobRequests, setPendingJobRequests] = useState([]);
+  const [isLoadingPendingRequests, setIsLoadingPendingRequests] = useState(true);
+  const [pendingRequestsError, setPendingRequestsError] = useState("");
+  const [jobAllocationsHistory, setJobAllocationsHistory] = useState([]);
+  const [isLoadingJobAllocationsHistory, setIsLoadingJobAllocationsHistory] = useState(true);
+  const [jobAllocationsHistoryError, setJobAllocationsHistoryError] = useState("");
 
   // Branch dropdown & filtering state
   const [selectedBranch, setSelectedBranch] = useState("All branches");
+  const branchBeforeJobAllocation = useRef("All branches");
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const branchDropdownRef = useRef(null);
   const [selectedCategory, setSelectedCategory] = useState("All categories");
@@ -152,9 +124,43 @@ function Inventory() {
 
   useEffect(() => {
     let isCurrent = true;
-    fetchInventoryRecords()
-      .then((records) => {
-        if (isCurrent) setInventoryRecords(records);
+    setIsLoadingInventory(!isAllocationRoute || isJobAllocation);
+    setIsLoadingPendingRequests(true);
+    setJobAllocation(null);
+    setInventoryError("");
+    setPendingRequestsError("");
+    setActionError("");
+    setSelectedItems({});
+    setIssueQuantities({});
+    const inventoryRequest = isJobAllocation
+      ? callAuthFunction("list-job-allocation-stock", {
+          jobNumber: allocationJobNumber,
+        })
+      : isAllocationRoute
+        ? Promise.resolve(null)
+        : callAuthFunction("list-inventory");
+    inventoryRequest
+      .then((result) => {
+        if (!isCurrent) return;
+        if (result) {
+          if (result.job?.allocated) {
+            navigate("/reports/new", { replace: true });
+            return;
+          }
+          const records = (result.items || []).map(mapInventoryRecord);
+          if (isJobAllocation) {
+            setAllocationInventoryRecords(records);
+          } else {
+            setInventoryRecords(records);
+          }
+          if (result.job) {
+            setJobAllocation(result.job);
+            setSelectedJobId(result.job.jobNumber);
+            setSelectedBranch(
+              result.job.branch.replace(/^./, (letter) => letter.toUpperCase()),
+            );
+          }
+        }
       })
       .catch((error) => {
         if (isCurrent) setInventoryError(error.message);
@@ -162,10 +168,30 @@ function Inventory() {
       .finally(() => {
         if (isCurrent) setIsLoadingInventory(false);
       });
+    callAuthFunction("list-pending-job-requests")
+      .then(({ jobs }) => {
+        if (isCurrent) setPendingJobRequests(jobs || []);
+      })
+      .catch((error) => {
+        if (isCurrent) setPendingRequestsError(error.message);
+      })
+      .finally(() => {
+        if (isCurrent) setIsLoadingPendingRequests(false);
+      });
+    callAuthFunction("list-job-allocation-history")
+      .then(({ allocations }) => {
+        if (isCurrent) setJobAllocationsHistory(allocations || []);
+      })
+      .catch((error) => {
+        if (isCurrent) setJobAllocationsHistoryError(error.message);
+      })
+      .finally(() => {
+        if (isCurrent) setIsLoadingJobAllocationsHistory(false);
+      });
     return () => {
       isCurrent = false;
     };
-  }, []);
+  }, [allocationJobNumber, isAllocationRoute, isJobAllocation, navigate]);
 
   // Close branch dropdown on outside click
   useEffect(() => {
@@ -184,7 +210,12 @@ function Inventory() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const filteredInventoryItems = inventoryRecords.filter((item) => {
+  const isAllocatingForJob = showJobCards && Boolean(jobAllocation);
+  const recordsToDisplay =
+    isAllocatingForJob && inventoryRecords.length === 0
+      ? allocationInventoryRecords
+      : inventoryRecords;
+  const filteredInventoryItems = recordsToDisplay.filter((item) => {
     const itemBranch = item[5];
     const itemCategory = item[9];
     const matchesBranch =
@@ -195,13 +226,15 @@ function Inventory() {
       itemCategory.toLowerCase() === selectedCategory.toLowerCase();
     return matchesBranch && matchesCategory;
   });
+  const availableQuantities = new Map(
+    recordsToDisplay.map((item) => [item[12], item[16] ?? Number(item[3])]),
+  );
   const hasInventoryItems = filteredInventoryItems.length > 0;
   const newItemTotalCost =
     (Number(newItemQuantity) || 0) * (Number(newItemUnitPrice) || 0);
   const selectedInventoryItem = inventoryRecords.find(
     (item) => item[12] === selectedItemCode,
   );
-
   const metricCards = [
     [
       "inventory_2",
@@ -231,6 +264,90 @@ function Inventory() {
   };
 
   const selectedCount = Object.values(selectedItems).filter(Boolean).length;
+
+  async function handleAcceptJobStock() {
+    const jobNumber = jobAllocation?.jobNumber || allocationJobNumber;
+    if (!jobNumber || !selectedCount) return;
+    const items = Object.entries(selectedItems)
+      .filter(([, selected]) => selected)
+      .map(([stockId]) => ({
+        stockId,
+        quantity: Number(issueQuantities[stockId] || 1),
+      }));
+
+    setActionError("");
+    setIsAllocatingStock(true);
+    try {
+      await callAuthFunction("allocate-job-stock", {
+        jobNumber,
+        items,
+      });
+      navigate(`/reports/new?job=${encodeURIComponent(jobNumber)}`);
+    } catch (error) {
+      setActionError(error.message);
+    } finally {
+      setIsAllocatingStock(false);
+    }
+  }
+
+  async function handleSelectPendingJob(job) {
+    branchBeforeJobAllocation.current = selectedBranch;
+    setSelectedJobId(job.jobNumber);
+    setShowJobCards(true);
+    setActiveTab("Stock Ledger");
+    setIsLoadingInventory(true);
+    setInventoryError("");
+    setActionError("");
+    setSelectedItems({});
+    setIssueQuantities({});
+    setAllocationInventoryRecords([]);
+    try {
+      const result = await callAuthFunction("list-job-allocation-stock", {
+        jobNumber: job.jobNumber,
+      });
+      if (result.job?.allocated) {
+        setPendingJobRequests((requests) =>
+          requests.filter((request) => request.jobNumber !== job.jobNumber),
+        );
+        setShowJobCards(false);
+        setActiveTab("Pending Job Requests");
+        setPendingRequestsError("Stock has already been allocated to this job. Refresh the request list.");
+        return;
+      }
+      setAllocationInventoryRecords((result.items || []).map(mapInventoryRecord));
+      setJobAllocation(result.job);
+      setSelectedBranch(
+        result.job.branch.replace(/^./, (letter) => letter.toUpperCase()),
+      );
+    } catch (error) {
+      setInventoryError(error.message);
+      setShowJobCards(false);
+      setActiveTab("Pending Job Requests");
+    } finally {
+      setIsLoadingInventory(false);
+    }
+  }
+
+  function resetJobAllocation() {
+    setShowJobCards(false);
+    setJobAllocation(null);
+    setSelectedJobId("");
+    setSelectedItems({});
+    setIssueQuantities({});
+    setAllocationInventoryRecords([]);
+    setSelectedBranch(branchBeforeJobAllocation.current);
+    setActionError("");
+  }
+
+  function handleBackToPendingRequests() {
+    resetJobAllocation();
+    setActiveTab("Pending Job Requests");
+  }
+
+  function handleCancelJobAllocation() {
+    resetJobAllocation();
+    setActiveTab("Stock Ledger");
+  }
 
   async function handleStockAdjustment(direction) {
     const quantity = Number(stockAdjustment);
@@ -311,20 +428,13 @@ function Inventory() {
                 Inventory
               </h1>
               <p className="mb-0 mt-2 text-[14px] text-[#8b949c] max-[620px]:mt-1 max-[620px]:text-[9px]">
-                {showJobCards
+                {isAllocatingForJob
                   ? `Select parts and quantities for ${selectedJobId}.`
                   : "Know what can leave the branch before the truck does."}
               </p>
             </div>
             <div className="flex items-center gap-3 max-[620px]:gap-2">
-              <button
-                type="button"
-                onClick={() => setShowJobCards((prev) => !prev)}
-                className="rounded-[6px] border border-[#1250a0] bg-white px-5 py-3 text-[12px] font-bold text-[#1250a0] shadow-[0_2px_4px_rgb(18_80_160_/_12%)] hover:bg-[#f3f8ff] max-[1024px]:px-4 max-[1024px]:py-2 max-[620px]:text-[9px]"
-              >
-                {showJobCards ? "Show Inventory Metrics" : "Choose Another Job"}
-              </button>
-              <button
+              {!isAllocatingForJob && !isAllocationRoute && !isJobAllocation && <button
                 type="button"
                 onClick={() => {
                   setFormError("");
@@ -336,62 +446,18 @@ function Inventory() {
                 className="rounded-[6px] border border-[#1250a0] bg-white px-5 py-3 text-[12px] font-bold text-[#1250a0] shadow-[0_2px_4px_rgb(18_80_160_/_12%)] hover:bg-[#f3f8ff] max-[1024px]:px-4 max-[1024px]:py-2 max-[620px]:text-[9px]"
               >
                 + Add New Item
-              </button>
-              <button
+              </button>}
+              {!isAllocatingForJob && !isAllocationRoute && !isJobAllocation && <button
                 type="button"
                 onClick={() => setIsCreateRequisition(true)}
                 className="rounded-[6px] bg-[#1250a0] px-5 py-3 text-[12px] font-bold text-white shadow-[0_2px_4px_rgb(18_80_160_/_25%)] max-[1024px]:px-4 max-[1024px]:py-2 max-[620px]:text-[9px]"
               >
                 + Create Requisition
-              </button>
+              </button>}
             </div>
           </div>
 
-          {/* Cards Header Display Section (Whole card clickable) */}
-          {showJobCards ? (
-            <div className="mb-6 grid grid-cols-2 gap-[18px] max-[768px]:grid-cols-1">
-              {confirmedJobsData.map((job) => {
-                const isSelected = selectedJobId === job.id;
-                return (
-                  <div
-                    key={job.id}
-                    onClick={() => {
-                      setSelectedJobId(job.id);
-                      setActiveTab("Stock Ledger");
-                    }}
-                    className={`relative cursor-pointer rounded-[11px] border bg-white p-6 shadow-[0_3px_8px_rgb(31_59_82_/_14%)] transition-all hover:border-[#1250a0] ${
-                      isSelected
-                        ? "border-[#1250a0] ring-1 ring-[#1250a0]"
-                        : "border-[#dfe6ec]"
-                    }`}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-[6px] bg-[#d6e6fb] text-[#1954a0]">
-                        <span className="material-symbols-outlined text-[20px]">
-                          work
-                        </span>
-                      </div>
-                      <span className="rounded-full bg-[#f3f8ff] px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-[#1250a0]">
-                        {job.status}
-                      </span>
-                    </div>
-                    <div className="mt-4">
-                      <p className="m-0 text-[11px] font-bold text-[#858b90]">
-                        {job.id} · {job.branch}
-                      </p>
-                      <h3 className="m-0 mt-1 text-[16px] font-bold text-[#063b7c]">
-                        {job.title}
-                      </h3>
-                      <p className="m-0 mt-1 text-[11px] text-[#8e959b]">
-                        {job.date}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <section className="grid grid-cols-3 gap-[18px] transition-[max-height,opacity] duration-300 ease-in-out max-[620px]:gap-1">
+          <section className="grid grid-cols-3 gap-[18px] transition-[max-height,opacity] duration-300 ease-in-out max-[620px]:gap-1">
               {metricCards.map(([icon, title, value, note, alert]) => (
                 <article
                   className={`relative min-h-[156px] rounded-[11px] border bg-white p-7 shadow-[0_3px_8px_rgb(31_59_82_/_14%)] max-[1024px]:min-h-[112px] max-[1024px]:p-4 max-[620px]:min-h-[58px] max-[620px]:rounded-[6px] max-[620px]:p-2 ${alert ? "border-[#ff725f]" : "border-[#dfe6ec]"}`}
@@ -420,8 +486,7 @@ function Inventory() {
                   </small>
                 </article>
               ))}
-            </section>
-          )}
+          </section>
 
           {/* Tabbed Content Container */}
           <div className="mt-5 overflow-hidden rounded-[11px] border border-[#dfe6ec] bg-white shadow-[0_3px_8px_rgb(31_59_82_/_14%)]">
@@ -456,12 +521,12 @@ function Inventory() {
                 <header className="flex items-center justify-between gap-4 border-b border-[#e1e6eb] px-7 py-5 max-[620px]:items-start max-[620px]:px-3 max-[620px]:py-3">
                   <div>
                     <p className="m-0 text-[10px] font-bold uppercase tracking-[.12em] text-[#777e85]">
-                      {showJobCards
+                      {isAllocatingForJob
                         ? `ALLOCATING STOCK · ${selectedJobId}`
                         : "Stock ledger"}
                     </p>
                     <h2 className="m-0 mt-1 text-[21px] font-bold max-[620px]:text-[13px]">
-                      {showJobCards
+                      {isAllocatingForJob
                         ? "Select items from inventory"
                         : "Parts & equipment"}
                     </h2>
@@ -568,23 +633,7 @@ function Inventory() {
                 </header>
 
                 {/* Table Header */}
-                {showJobCards ? (
-                  <div className="grid grid-cols-[40px_1.5fr_1fr_1fr_1fr_1.2fr_0.8fr_1fr_1fr_1fr_1.2fr_40px] items-center bg-[#fafafa] px-7 py-3 text-[10px] font-bold uppercase tracking-[.08em] text-[#77818a]">
-                    <span>Select</span>
-                    <span>Part Name & Code</span>
-                    <span>Available Qty</span>
-                    <span>Qty To Issue</span>
-                    <span>Allocated Qty</span>
-                    <span>Target Job</span>
-                    <span>Branch</span>
-                    <span>Address</span>
-                    <span>Unit Price</span>
-                    <span>Total Cost</span>
-                    <span>Status</span>
-                    <span>Action</span>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-[2fr_.8fr_.9fr_1.25fr_1fr_1fr_1fr_1fr_90px] items-center bg-[#fafafa] px-7 py-3 text-[10px] font-bold uppercase tracking-[.08em] text-[#77818a] max-[1100px]:grid-cols-[2fr_1fr_1fr_1fr_1fr_90px] max-[1100px]:[&>span:nth-child(4)]:hidden max-[1100px]:[&>span:nth-child(5)]:hidden max-[1100px]:[&>span:nth-child(6)]:hidden max-[850px]:grid-cols-[2fr_1fr_1fr_1fr_90px] max-[850px]:[&>span:nth-child(7)]:hidden max-[850px]:px-4 max-[620px]:hidden">
+                <div className="grid grid-cols-[2fr_.8fr_.9fr_1.25fr_1fr_1fr_1fr_1fr_140px] items-center bg-[#fafafa] px-7 py-3 text-[10px] font-bold uppercase tracking-[.08em] text-[#77818a] max-[1100px]:grid-cols-[2fr_1fr_1fr_1fr_1fr_140px] max-[1100px]:[&>span:nth-child(4)]:hidden max-[1100px]:[&>span:nth-child(5)]:hidden max-[1100px]:[&>span:nth-child(6)]:hidden max-[850px]:grid-cols-[2fr_1fr_1fr_1fr_140px] max-[850px]:[&>span:nth-child(7)]:hidden max-[850px]:px-4 max-[620px]:hidden">
                     <span>Part name</span>
                     <span>Quantity</span>
                     <span>Branch</span>
@@ -594,8 +643,7 @@ function Inventory() {
                     <span>Category</span>
                     <span>Status</span>
                     <span>Action</span>
-                  </div>
-                )}
+                </div>
 
                 {inventoryError && (
                   <p
@@ -640,76 +688,15 @@ function Inventory() {
                       stockId,
                     ]) => {
                       const isChecked = !!selectedItems[stockId];
-                      return showJobCards ? (
+                      const availableQuantity = Number(
+                        availableQuantities.get(stockId) ?? quantity,
+                      );
+                      const isJobBranch =
+                        branch.toLowerCase() ===
+                        String(jobAllocation?.branch || "").toLowerCase();
+                      return (
                         <div
-                          className={`grid grid-cols-[40px_1.5fr_1fr_1fr_1fr_1.2fr_0.8fr_1fr_1fr_1fr_1.2fr_40px] items-center border-t border-[#e4e8eb] px-7 py-3 text-[11px] transition-colors ${
-                            isChecked
-                              ? "bg-[#f3f8ff]"
-                              : "bg-white hover:bg-[#fafafa]"
-                          }`}
-                          key={stockId}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => handleSelectItem(stockId)}
-                            className="h-4 w-4 rounded border-gray-300 text-[#1250a0] focus:ring-[#1250a0]"
-                          />
-                          <div className="min-w-0">
-                            <strong className="block truncate">{name}</strong>
-                            <small className="mt-1 block text-[10px] text-[#8d969e]">
-                              {code}
-                            </small>
-                          </div>
-                          <strong className="text-[11px]">{quantity}</strong>
-                          <div>
-                            <input
-                              type="number"
-                              min="1"
-                              max={quantity}
-                              value={issueQuantities[stockId] || "1"}
-                              onChange={(e) =>
-                                handleQuantityChange(stockId, e.target.value)
-                              }
-                              className="h-8 w-16 rounded border border-[#d9dfe4] bg-white px-2 text-center text-[11px] text-[#1250a0] outline-none focus:border-[#1250a0]"
-                            />
-                          </div>
-                          <span className="text-[#7f8992]">0 Allocated</span>
-                          <span className="font-semibold text-[#1250a0]">
-                            {selectedJobId}
-                          </span>
-                          <strong>{branch}</strong>
-                          <span className="text-[#7f8992]">{address}</span>
-                          <span className="text-[#174f9a]">{unitPrice}</span>
-                          <strong className="text-[#174f9a]">
-                            {totalCost}
-                          </strong>
-                          <span
-                            className={`w-max rounded-full border px-3 py-1 text-[10px] ${
-                              alert
-                                ? "border-[#ffb0a3] text-[#f05b48]"
-                                : "border-[#d7dadd] text-[#70777d]"
-                            }`}
-                          >
-                            {statusName}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedItemCode(stockId);
-                              setStockAdjustment("");
-                              setActionError("");
-                            }}
-                            className="text-[#7f8992] hover:text-[#1250a0]"
-                          >
-                            <span className="material-symbols-outlined text-[18px]">
-                              edit
-                            </span>
-                          </button>
-                        </div>
-                      ) : (
-                        <div
-                          className={`grid min-h-[64px] grid-cols-[2fr_.8fr_.9fr_1.25fr_1fr_1fr_1fr_1fr_90px] items-center border-t border-[#e4e8eb] px-7 text-[11px] max-[1100px]:grid-cols-[2fr_1fr_1fr_1fr_1fr_90px] max-[1100px]:[&>*:nth-child(4)]:hidden max-[1100px]:[&>*:nth-child(5)]:hidden max-[1100px]:[&>*:nth-child(6)]:hidden max-[850px]:grid-cols-[2fr_1fr_1fr_1fr_90px] max-[850px]:[&>*:nth-child(7)]:hidden max-[850px]:px-4 max-[620px]:min-h-[62px] max-[620px]:grid-cols-[1fr_auto] max-[620px]:gap-x-2 max-[620px]:gap-y-1 max-[620px]:px-3 max-[620px]:py-2 ${
+                          className={`grid min-h-[64px] grid-cols-[2fr_.8fr_.9fr_1.25fr_1fr_1fr_1fr_1fr_140px] items-center border-t border-[#e4e8eb] px-7 text-[11px] max-[1100px]:grid-cols-[2fr_1fr_1fr_1fr_1fr_140px] max-[1100px]:[&>*:nth-child(4)]:hidden max-[1100px]:[&>*:nth-child(5)]:hidden max-[1100px]:[&>*:nth-child(6)]:hidden max-[850px]:grid-cols-[2fr_1fr_1fr_1fr_140px] max-[850px]:[&>*:nth-child(7)]:hidden max-[850px]:px-4 max-[620px]:min-h-[62px] max-[620px]:grid-cols-[1fr_auto] max-[620px]:gap-x-2 max-[620px]:gap-y-1 max-[620px]:px-3 max-[620px]:py-2 ${
                             alert ? "bg-[#fff3f1]" : "bg-white"
                           }`}
                           key={stockId}
@@ -734,7 +721,7 @@ function Inventory() {
                             </span>
                           </div>
                           <strong className="max-[620px]:col-start-2 max-[620px]:row-start-1 max-[620px]:text-[9px]">
-                            {quantity}
+                            {isAllocatingForJob ? availableQuantity : quantity}
                             <small className="font-normal text-[#8d969e]">
                               {" "}
                               / min {minimum}
@@ -767,17 +754,53 @@ function Inventory() {
                             </span>
                             {statusName}
                           </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSelectedItemCode(stockId);
-                              setStockAdjustment("");
-                              setActionError("");
-                            }}
-                            className="text-right text-[10px] font-bold text-[#7573bd] hover:text-[#1250a0] max-[620px]:col-start-2 max-[620px]:row-start-3"
-                          >
-                            View
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            {isAllocatingForJob ? (
+                              <>
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  disabled={availableQuantity <= 0 || !isJobBranch}
+                                  aria-label={`Select ${name} for ${selectedJobId}`}
+                                  title={
+                                    isJobBranch
+                                      ? undefined
+                                      : "Stock can only be allocated from the job's branch"
+                                  }
+                                  onChange={() => handleSelectItem(stockId)}
+                                  className="h-4 w-4 rounded border-gray-300 text-[#1250a0] focus:ring-[#1250a0]"
+                                />
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max={availableQuantity}
+                                  value={issueQuantities[stockId] || "1"}
+                                  disabled={
+                                    !isChecked ||
+                                    availableQuantity <= 0 ||
+                                    !isJobBranch
+                                  }
+                                  aria-label={`Quantity of ${name} to issue`}
+                                  onChange={(event) =>
+                                    handleQuantityChange(stockId, event.target.value)
+                                  }
+                                  className="h-8 w-[68px] rounded border border-[#d9dfe4] bg-white px-2 text-center text-[11px] text-[#1250a0] outline-none focus:border-[#1250a0] disabled:bg-[#f2f4f6]"
+                                />
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedItemCode(stockId);
+                                  setStockAdjustment("");
+                                  setActionError("");
+                                }}
+                                className="text-right text-[10px] font-bold text-[#7573bd] hover:text-[#1250a0] max-[620px]:col-start-2 max-[620px]:row-start-3"
+                              >
+                                View
+                              </button>
+                            )}
+                          </div>
                         </div>
                       );
                     },
@@ -785,34 +808,40 @@ function Inventory() {
                 )}
 
                 {/* Footer Action Bar when Items are Selected & Job Cards Mode is Active */}
-                {showJobCards && (
+                {isAllocatingForJob && (
                   <div className="flex items-center justify-between border-t border-[#e1e6eb] bg-[#fafafa] px-7 py-4">
                     <div>
                       <strong className="block text-[13px] text-[#063b7c]">
                         {selectedCount} items selected
                       </strong>
                       <span className="text-[11px] text-[#8b949c]">
-                        for {selectedJobId} · R. Villanueva
+                        for {selectedJobId} · {jobAllocation?.technicianName}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-3">
                       <button
                         type="button"
-                        onClick={() => setSelectedItems({})}
+                        onClick={handleCancelJobAllocation}
                         className="rounded-[6px] border border-[#1250a0] bg-white px-5 py-2 text-[12px] font-bold text-[#1250a0] hover:bg-[#f3f8ff]"
                       >
                         Cancel
                       </button>
                       <button
                         type="button"
-                        disabled={selectedCount === 0}
+                        onClick={handleAcceptJobStock}
+                        disabled={!jobAllocation || selectedCount === 0 || isAllocatingStock}
                         className="rounded-[6px] bg-[#1250a0] px-5 py-2 text-[12px] font-bold text-white shadow-[0_2px_4px_rgb(18_80_160_/_25%)] disabled:opacity-50"
                       >
-                        Accept & Deduct Stock
+                        {isAllocatingStock ? "Reserving stock..." : "Confirm & Reserve Stock"}
                       </button>
                     </div>
                   </div>
+                )}
+                {actionError && isAllocatingForJob && (
+                  <p className="m-0 border-t border-[#f1b7af] bg-[#fff3f1] px-7 py-3 text-[12px] text-[#a83a2c]" role="alert">
+                    {actionError}
+                  </p>
                 )}
               </>
             )}
@@ -830,9 +859,15 @@ function Inventory() {
                     </h2>
                   </div>
                   <span className="rounded-full border border-[#ffb0a3] bg-[#fff3f1] px-3 py-1 text-[11px] font-bold text-[#f05b48]">
-                    2 confirmed schedules
+                    {pendingJobRequests.length} awaiting allocation
                   </span>
                 </div>
+
+                {pendingRequestsError && (
+                  <p className="mb-3 rounded-[6px] border border-[#f1b7af] bg-[#fff3f1] px-4 py-3 text-[12px] text-[#a83a2c]" role="alert">
+                    {pendingRequestsError}
+                  </p>
+                )}
 
                 <div className="overflow-hidden rounded-[8px] border border-[#dfe6ec]">
                   <div className="grid grid-cols-[1.2fr_2fr_1.5fr_1fr_1.2fr_120px] bg-[#fafafa] px-6 py-3 text-[10px] font-bold uppercase text-[#77818a]">
@@ -844,38 +879,58 @@ function Inventory() {
                     <span className="text-right">Action</span>
                   </div>
 
-                  {pendingJobRequestsData.map((req, idx) => (
-                    <div
-                      key={idx}
-                      className="grid grid-cols-[1.2fr_2fr_1.5fr_1fr_1.2fr_120px] items-center border-t border-[#e4e8eb] px-6 py-4 text-[11px]"
-                    >
-                      <div>
-                        <strong className="block text-[#063b7c]">
-                          {req.job}
-                        </strong>
-                        <span className="text-[10px] text-[#8d969e]">
-                          {req.status}
+                  {isLoadingPendingRequests ? (
+                    <p className="m-0 px-6 py-8 text-center text-[12px] text-[#8e959b]">
+                      Loading pending job requests...
+                    </p>
+                  ) : pendingJobRequests.length === 0 ? (
+                    <p className="m-0 px-6 py-8 text-center text-[12px] text-[#8e959b]">
+                      No confirmed jobs are waiting for stock allocation.
+                    </p>
+                  ) : (
+                    pendingJobRequests.map((req) => (
+                      <div
+                        key={req.jobNumber}
+                        className="grid grid-cols-[1.2fr_2fr_1.5fr_1fr_1.2fr_120px] items-center border-t border-[#e4e8eb] px-6 py-4 text-[11px]"
+                      >
+                        <div>
+                          <strong className="block text-[#063b7c]">
+                            {req.jobNumber}
+                          </strong>
+                          <span className="text-[10px] text-[#8d969e]">
+                            Pending
+                          </span>
+                        </div>
+                        <span className="text-[#3a434d]">{req.location}</span>
+                        <span className="text-[#3a434d]">
+                          <span
+                            className={
+                              isScheduleNearToday(req.scheduledDate)
+                                ? "font-semibold text-red-600"
+                                : ""
+                            }
+                          >
+                            {req.scheduledDate} · {req.scheduledTime}
+                          </span>
                         </span>
+                        <strong className="text-[#3a434d]">
+                          {req.branch.replace(/^./, (letter) => letter.toUpperCase())}
+                        </strong>
+                        <span className="text-[#3a434d]">
+                          {req.technicianName}
+                        </span>
+                        <div className="text-right">
+                          <button
+                            type="button"
+                            onClick={() => handleSelectPendingJob(req)}
+                            className="rounded-[6px] border border-[#1250a0] bg-white px-3 py-1.5 text-[11px] font-bold text-[#1250a0] hover:bg-[#f3f8ff]"
+                          >
+                            Select items
+                          </button>
+                        </div>
                       </div>
-                      <span className="text-[#3a434d]">{req.location}</span>
-                      <span className="text-[#3a434d]">{req.scheduled}</span>
-                      <strong className="text-[#3a434d]">{req.branch}</strong>
-                      <span className="text-[#3a434d]">{req.technician}</span>
-                      <div className="text-right">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedJobId(req.job.toUpperCase());
-                            setShowJobCards(true);
-                            setActiveTab("Stock Ledger");
-                          }}
-                          className="rounded-[6px] border border-[#1250a0] bg-white px-3 py-1.5 text-[11px] font-bold text-[#1250a0] hover:bg-[#f3f8ff]"
-                        >
-                          Select items
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
             )}
@@ -893,7 +948,7 @@ function Inventory() {
                     </h2>
                   </div>
                   <span className="rounded-full border border-[#d7dadd] bg-[#fafafa] px-3 py-1 text-[11px] font-bold text-[#70777d]">
-                    3 entries
+                    {jobAllocationsHistory.length} {jobAllocationsHistory.length === 1 ? "entry" : "entries"}
                   </span>
                 </div>
 
@@ -902,31 +957,56 @@ function Inventory() {
                     <span>Date</span>
                     <span>Job</span>
                     <span>Item</span>
-                    <span>Qty Issued</span>
+                    <span>Qty Reserved</span>
                     <span>Technician</span>
                   </div>
 
-                  {jobAllocationsHistoryData.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="grid grid-cols-[1.5fr_1.5fr_2fr_1fr_1.5fr] items-center border-t border-[#e4e8eb] px-6 py-4 text-[11px]"
-                    >
-                      <span className="text-[#8e959b]">{item.date}</span>
-                      <strong className="text-[#063b7c]">{item.job}</strong>
-                      <div>
-                        <strong className="block text-[#063b7c]">
-                          {item.item}
-                        </strong>
-                        <span className="text-[10px] text-[#8d969e]">
-                          {item.code}
+                  {isLoadingJobAllocationsHistory ? (
+                    <p className="m-0 px-6 py-8 text-center text-[12px] text-[#8e959b]">
+                      Loading allocation history...
+                    </p>
+                  ) : jobAllocationsHistoryError ? (
+                    <p className="m-0 px-6 py-8 text-center text-[12px] text-[#a83a2c]" role="alert">
+                      {jobAllocationsHistoryError}
+                    </p>
+                  ) : jobAllocationsHistory.length === 0 ? (
+                    <p className="m-0 px-6 py-8 text-center text-[12px] text-[#8e959b]">
+                      No stock reservations have been recorded.
+                    </p>
+                  ) : (
+                    jobAllocationsHistory.map((item) => (
+                      <div
+                        key={item.id}
+                        className="grid grid-cols-[1.5fr_1.5fr_2fr_1fr_1.5fr] items-center border-t border-[#e4e8eb] px-6 py-4 text-[11px]"
+                      >
+                        <span className="text-[#8e959b]">
+                          {item.date
+                            ? new Date(item.date).toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric",
+                              })
+                            : "—"}
                         </span>
+                        <div>
+                          <strong className="block text-[#063b7c]">{item.job}</strong>
+                          <span className="text-[10px] capitalize text-[#8d969e]">
+                            {item.status}
+                          </span>
+                        </div>
+                        <div>
+                          <strong className="block text-[#063b7c]">
+                            {item.item}
+                          </strong>
+                          <span className="text-[10px] text-[#8d969e]">
+                            {item.code}
+                          </span>
+                        </div>
+                        <strong className="text-[#063b7c]">{item.quantity}</strong>
+                        <span className="text-[#3a434d]">{item.technician}</span>
                       </div>
-                      <strong className="text-[#063b7c]">
-                        {item.qtyIssued}
-                      </strong>
-                      <span className="text-[#3a434d]">{item.technician}</span>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </div>
             )}

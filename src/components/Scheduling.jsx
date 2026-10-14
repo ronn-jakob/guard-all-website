@@ -29,6 +29,11 @@ function getDateKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function getToday() {
+  const today = new Date();
+  return new Date(today.getFullYear(), today.getMonth(), today.getDate());
+}
+
 function formatSelectedDate(date) {
   return date.toLocaleDateString("en-US", {
     weekday: "long",
@@ -36,6 +41,10 @@ function formatSelectedDate(date) {
     day: "numeric",
     year: "numeric",
   });
+}
+
+function getTechnicianRoleUsers(technicians) {
+  return technicians.filter((technician) => technician.roleName === "Technician");
 }
 
 function Scheduling() {
@@ -69,10 +78,8 @@ function Scheduling() {
   const navigate = useNavigate();
   // State to manage active view mode ('list' | 'calendar')
   const [viewMode, setViewMode] = useState("list");
-  const [rangeStart, setRangeStart] = useState(new Date(2026, 8, 1));
-  const [selectedCalendarDate, setSelectedCalendarDate] = useState(
-    new Date(2026, 8, 1),
-  );
+  const [rangeStart, setRangeStart] = useState(getToday);
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState(getToday);
 
   useEffect(() => {
     let isMounted = true;
@@ -96,18 +103,6 @@ function Scheduling() {
           ]),
         );
         setScheduledJobDates(nextDates);
-        const lastConfirmedOrder = localStorage.getItem(
-          `${confirmedAssignmentsKey}:last`,
-        );
-        const lastConfirmedJob = schedules.find(
-          (job) => job.order === lastConfirmedOrder,
-        );
-        if (lastConfirmedJob) {
-          const confirmedDate = nextDates[lastConfirmedJob.order];
-          setSelectedOrder(lastConfirmedJob.order);
-          setRangeStart(confirmedDate);
-          setSelectedCalendarDate(confirmedDate);
-        }
       })
       .catch((error) => {
         if (isMounted) setFormError(error.message);
@@ -123,7 +118,9 @@ function Scheduling() {
       date: getDateKey(selectedCalendarDate),
     })
       .then(({ technicians: availableTechnicians }) => {
-        if (isMounted) setTechnicianOptions(availableTechnicians || []);
+        if (isMounted) {
+          setTechnicianOptions(getTechnicianRoleUsers(availableTechnicians || []));
+        }
       })
       .catch((error) => {
         if (isMounted) setFormError(error.message);
@@ -141,7 +138,9 @@ function Scheduling() {
       excludeOrder: editValues.order,
     })
       .then(({ technicians: availableTechnicians }) => {
-        if (isMounted) setEditTechnicianOptions(availableTechnicians || []);
+        if (isMounted) {
+          setEditTechnicianOptions(getTechnicianRoleUsers(availableTechnicians || []));
+        }
       })
       .catch((error) => {
         if (isMounted) setFormError(error.message);
@@ -226,8 +225,10 @@ function Scheduling() {
     }
   }
 
+  const defaultVisibleJob =
+    viewMode === "calendar" ? selectedDayJobs[0] : scheduledJobsInRange[0];
   const selectedJob = schedule.find((job) => job[3] === selectedOrder) ??
-    schedule[0] ?? [
+    defaultVisibleJob ?? [
       "--:--",
       "",
       "No scheduled jobs",
@@ -248,8 +249,7 @@ function Scheduling() {
       confirmedAssignmentsKey,
       JSON.stringify([...nextConfirmedAssignments]),
     );
-    localStorage.setItem(`${confirmedAssignmentsKey}:last`, order);
-    navigate(`/reports/new?job=${encodeURIComponent(order)}`);
+    navigate(`/inventory/allocate?job=${encodeURIComponent(order)}`);
   }
 
   async function handleCreateJob(event) {
@@ -738,7 +738,7 @@ function Scheduling() {
                   check
                 </span>
                 {confirmedAssignments.has(selectedJob[3])
-                  ? "Open field report"
+                  ? "Continue to inventory request"
                   : "Confirm assignment"}
               </button>
             </aside>
@@ -893,18 +893,6 @@ function Scheduling() {
                 </div>
                 <div className="mt-2 grid gap-2">
                   {editTechnicians.map((technicianId, index) => {
-                    const assignedTechnician = selectedJob[8]?.find(
-                      (technician) => technician.id === technicianId,
-                    );
-                    const options = [
-                      ...editTechnicianOptions,
-                      ...(assignedTechnician &&
-                      !editTechnicianOptions.some(
-                        (option) => option.id === technicianId,
-                      )
-                        ? [{ ...assignedTechnician, unavailable: true }]
-                        : []),
-                    ];
                     return (
                       <div
                         className="flex items-center gap-2"
@@ -924,17 +912,10 @@ function Scheduling() {
                           }
                           className="h-11 min-w-0 flex-1 rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
                         >
-                          <option value="">Select a technician</option>
-                          {options.map((option) => (
-                            <option
-                              key={option.id}
-                              value={option.id}
-                              disabled={option.unavailable}
-                            >
+                          <option value="" disabled>Select a technician</option>
+                          {editTechnicianOptions.map((option) => (
+                            <option key={option.id} value={option.id}>
                               {option.name}
-                              {option.unavailable
-                                ? " (unavailable on this date)"
-                                : ""}
                             </option>
                           ))}
                         </select>
@@ -1215,7 +1196,7 @@ function Scheduling() {
                         }
                         className="h-12 min-w-0 flex-1 rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
                       >
-                        <option value="">Select a technician</option>
+                        <option value="" disabled>Select a technician</option>
                         {technicianOptions.map((option) => (
                           <option key={option.id} value={option.id}>
                             {option.name}

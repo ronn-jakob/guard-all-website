@@ -114,6 +114,7 @@ function ReportsOverview() {
                 String(
                   reports.filter(
                     (report) =>
+                      !report.isPendingReport &&
                       report.signature?.method !== "Awaiting client sign-off",
                   ).length,
                 ),
@@ -145,8 +146,8 @@ function ReportsOverview() {
                   </h2>
                   <p className="m-0 mt-1 text-[12px] text-[#8b949c]">
                     {reports.length
-                      ? `${reports.length} report${reports.length === 1 ? "" : "s"} in current queue`
-                      : "No reports in current queue"}
+                      ? `${reports.length} item${reports.length === 1 ? "" : "s"} in current queue`
+                      : "No reports or reserved jobs in current queue"}
                   </p>
                 </div>
                 <button
@@ -161,8 +162,7 @@ function ReportsOverview() {
               <div>
                 {reports.length === 0 ? (
                   <div className="px-5 py-8 text-center text-[13px] text-[#7d8994]">
-                    No incoming reports yet. Submit a new field report to
-                    populate this queue.
+                    No reports or reserved jobs are waiting in the queue.
                   </div>
                 ) : (
                   reports.map((report) => (
@@ -212,7 +212,8 @@ function ReportsOverview() {
                       {selectedReport.client}
                     </h2>
                     <p className="m-0 mt-1 text-[11px] text-[#8b949c]">
-                      {selectedReport.service} &nbsp;•&nbsp; Submitted{" "}
+                      {selectedReport.service} &nbsp;•&nbsp;{" "}
+                      {selectedReport.isPendingReport ? "Stock reserved" : "Submitted"}{" "}
                       {selectedReport.time}
                     </p>
                   </div>
@@ -242,7 +243,7 @@ function ReportsOverview() {
                     </p>
                     <div className="my-4 border-t border-[#e1e6eb]" />
                     <p className="m-0 text-[11px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
-                      02 / Parts Used
+                      02 / {selectedReport.isPendingReport ? "Reserved Parts" : "Parts Used"}
                     </p>
                     <div className="mt-3 rounded-[7px] border border-[#bac8db] bg-[#eef4ff] px-4 py-3 text-[12px] text-[#35649a]">
                       {selectedReport.parts.length === 0 ? (
@@ -338,28 +339,34 @@ function ReportsOverview() {
                   >
                     Show Full Details
                   </a>
-                  <div className="flex gap-3 max-[620px]:flex-1">
-                    <Link
-                      className="inline-flex h-10 flex-1 items-center justify-center rounded-[7px] border-2 border-[#c5ccd6] bg-transparent px-4 text-[12px] font-bold text-[#89939e] no-underline"
-                      to="/reports"
-                    >
-                      Return for Correction
-                    </Link>
-                    <button
-                      className="flex h-10 flex-1 items-center justify-center gap-2 rounded-[7px] bg-[#1953a5] px-4 text-[12px] font-bold text-white"
-                      type="button"
-                    >
-                      <span className="material-symbols-outlined text-[17px]">
-                        send
-                      </span>
-                      Approve for Billing
-                    </button>
-                  </div>
+                    {selectedReport.isPendingReport ? (
+                      <p className="m-0 text-[12px] font-semibold text-[#68798a]">
+                        Awaiting technician field report
+                      </p>
+                    ) : (
+                      <div className="flex gap-3 max-[620px]:flex-1">
+                        <Link
+                          className="inline-flex h-10 flex-1 items-center justify-center rounded-[7px] border-2 border-[#c5ccd6] bg-transparent px-4 text-[12px] font-bold text-[#89939e] no-underline"
+                          to="/reports"
+                        >
+                          Return for Correction
+                        </Link>
+                        <button
+                          className="flex h-10 flex-1 items-center justify-center gap-2 rounded-[7px] bg-[#1953a5] px-4 text-[12px] font-bold text-white"
+                          type="button"
+                        >
+                          <span className="material-symbols-outlined text-[17px]">
+                            send
+                          </span>
+                          Approve for Billing
+                        </button>
+                      </div>
+                    )}
                 </footer>
               </section>
             ) : (
               <section className="rounded-[10px] border border-dashed border-[#cbd8e7] bg-white px-5 py-8 text-center text-[14px] text-[#778593]">
-                No incoming reports. Submit a new report to populate this queue.
+                No incoming reports or reserved jobs are available.
               </section>
             )}
           </div>
@@ -421,7 +428,7 @@ function ReportsOverview() {
 
               <section>
                 <h3 className="m-0 text-[12px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
-                  Parts Used
+                  {selectedReportDetails.isPendingReport ? "Reserved Parts" : "Parts Used"}
                 </h3>
                 <div className="mt-2 overflow-x-auto rounded-[7px] border border-[#dfe6ec]">
                   <table className="w-full min-w-[560px] border-collapse text-left text-[12px]">

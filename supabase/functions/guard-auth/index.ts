@@ -135,6 +135,7 @@ function isSchedulingRole(role: string) {
 const schedulingActions = new Set(["list-technicians", "list-schedules", "create-schedule", "get-schedule", "update-schedule"]);
 const fieldReportActions = new Set(["list-field-report-jobs", "list-field-reports", "submit-field-report"]);
 const inventoryActions = new Set(["list-inventory", "create-inventory-item", "adjust-inventory-stock", "update-inventory-item"]);
+const jobAllocationActions = new Set(["list-pending-job-requests", "list-job-allocation-stock", "allocate-job-stock", "list-job-allocation-history"]);
 
 function jobTypeFor(serviceType: string) {
   if (serviceType === "Installation") return "installation";
@@ -157,7 +158,7 @@ function isFieldReportRole(role: string) {
 async function listTechnicians(date: string, excludeOrder = "") {
   const { data: users, error } = await supabase
     .from("users")
-    .select("user_id, first_name, last_name, branch, roles(role_name), technicians(technician_id)")
+    .select("user_id, first_name, last_name, branch, roles!inner(role_name), technicians(technician_id)")
     .eq("is_active", true)
     .eq("roles.role_name", "Technician")
     .order("first_name");
@@ -165,9 +166,11 @@ async function listTechnicians(date: string, excludeOrder = "") {
 
   const allTechnicians = [];
   for (const user of users ?? []) {
+    const role = Array.isArray(user.roles) ? user.roles[0] : user.roles;
+    if (role?.role_name !== "Technician") continue;
     const relation = Array.isArray(user.technicians) ? user.technicians[0] : user.technicians;
     const technicianId = relation?.technician_id ?? await ensureTechnicianRecord(user);
-    allTechnicians.push({ id: technicianId, name: [user.first_name, user.last_name].filter(Boolean).join(" "), branch: user.branch });
+    allTechnicians.push({ id: technicianId, name: [user.first_name, user.last_name].filter(Boolean).join(" "), branch: user.branch, roleName: role.role_name });
   }
 
   if (!date || !allTechnicians.length) return allTechnicians;
@@ -183,6 +186,26 @@ async function listTechnicians(date: string, excludeOrder = "") {
   if (bookedError) throw bookedError;
   const bookedIds = new Set((booked ?? []).map((assignment: { technician_id: string | number }) => assignment.technician_id));
   return allTechnicians.filter((technician) => !bookedIds.has(technician.id));
+}
+
+async function hasOnlyActiveTechnicianRole(technicianIds: string[]) {
+  if (!technicianIds.length) return true;
+  const { data: users, error } = await supabase
+    .from("users")
+    .select("technicians!inner(technician_id), roles!inner(role_name)")
+    .eq("is_active", true)
+    .eq("roles.role_name", "Technician")
+    .in("technicians.technician_id", technicianIds);
+  if (error) throw error;
+  const matchedIds = new Set(
+    (users ?? []).flatMap((user: any) => {
+      const relations = Array.isArray(user.technicians)
+        ? user.technicians
+        : [user.technicians];
+      return relations.map((technician: any) => technician.technician_id);
+    }),
+  );
+  return technicianIds.every((technicianId) => matchedIds.has(technicianId));
 }
 
 async function listSchedules() {
@@ -210,6 +233,8 @@ async function listSchedules() {
     return {
       id: job.job_id,
       order: job.job_number,
+      status: job.status,
+      branch: job.branch,
       date,
       time,
       dayLabel: new Date(`${date}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" }).toUpperCase(),
@@ -219,6 +244,83 @@ async function listSchedules() {
       technician: technicians.length ? technicians.map((technician: { name: string }) => technician.name).join(", ") : "Unassigned",
       technicians,
       stock: "Available",
+    };
+  });
+}
+
+async function listPendingJobRequests() {
+  const schedules = await listSchedules();
+  const { data: stockMovements, error } = await supabase
+    .from("stock_movements")
+    .select("related_job_id")
+    .eq("reason", "job_usage")
+    .not("related_job_id", "is", null);
+  if (error) throw error;
+  const allocatedJobIds = new Set(
+    (stockMovements ?? []).map((movement: { related_job_id: string }) => movement.related_job_id),
+  );
+  const { data: confirmedJobs, error: confirmedJobsError } = await supabase
+    .from("jobs")
+    .select("job_id")
+    .neq("parts_status", "pending");
+  if (confirmedJobsError) throw confirmedJobsError;
+  const confirmedJobIds = new Set(
+    (confirmedJobs ?? []).map((job: { job_id: string }) => job.job_id),
+  );
+
+  return schedules
+    .filter((job: any) =>
+      job.status === "scheduled" &&
+      job.technicians.length > 0 &&
+      !allocatedJobIds.has(job.id) &&
+      !confirmedJobIds.has(job.id)
+    )
+    .map((job: any) => ({
+      jobNumber: job.order,
+      location: job.location,
+      scheduledDate: job.date,
+      scheduledTime: job.time || "--:--",
+      branch: job.branch,
+      technicianName: job.technician,
+    }));
+}
+
+async function listJobAllocationHistory() {
+  const { data: allocations, error } = await supabase
+    .from("job_parts")
+    .select("job_part_id, quantity, status, reserved_at, parts!inner(sku, name), jobs!inner(job_number, job_technicians(is_active, technicians(users(first_name, last_name))))")
+    .order("reserved_at", { ascending: false });
+  if (error) throw error;
+
+  return (allocations ?? []).map((allocation: any) => {
+    const job = Array.isArray(allocation.jobs) ? allocation.jobs[0] : allocation.jobs;
+    const part = Array.isArray(allocation.parts) ? allocation.parts[0] : allocation.parts;
+    const assignments = Array.isArray(job?.job_technicians)
+      ? job.job_technicians
+      : job?.job_technicians
+        ? [job.job_technicians]
+        : [];
+    const technicianNames = assignments
+      .map((assignment: any) => {
+        const technician = Array.isArray(assignment.technicians)
+          ? assignment.technicians[0]
+          : assignment.technicians;
+        const user = technician && (Array.isArray(technician.users)
+          ? technician.users[0]
+          : technician.users);
+        return user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "";
+      })
+      .filter(Boolean);
+
+    return {
+      id: allocation.job_part_id,
+      date: allocation.reserved_at,
+      job: job?.job_number ?? "Unknown job",
+      item: part?.name ?? "Unknown item",
+      code: part?.sku ?? "",
+      quantity: allocation.quantity,
+      status: allocation.status,
+      technician: technicianNames.join(", ") || "Unassigned",
     };
   });
 }
@@ -246,7 +348,7 @@ async function getCurrentTechnicianId(session: Record<string, unknown>) {
 async function listFieldReportJobs(session: Record<string, unknown>) {
   let query = supabase
     .from("jobs")
-    .select("job_id, job_number, job_type, branch, scheduled_date, scheduled_time, clients(name, address), job_technicians!inner(technician_id, is_active, technicians!inner(user_id, users(first_name, last_name)))")
+    .select("job_id, job_number, job_type, branch, scheduled_date, scheduled_time, clients(name, address), job_parts(job_part_id, quantity, status, parts(sku, name)), job_technicians!inner(technician_id, is_active, technicians!inner(user_id, users(first_name, last_name)))")
     .eq("job_technicians.is_active", true)
     .neq("status", "cancelled")
     .order("scheduled_date")
@@ -272,13 +374,39 @@ async function listFieldReportJobs(session: Record<string, unknown>) {
     if (report.job_id) reportedJobIds.add(report.job_id);
   });
 
+  const { data: stockMovements, error: stockMovementError } = await supabase
+    .from("stock_movements")
+    .select("related_job_id")
+    .eq("reason", "job_usage")
+    .not("related_job_id", "is", null);
+  if (stockMovementError) throw stockMovementError;
+  const allocatedJobIds = new Set(
+    (stockMovements ?? []).map((movement: { related_job_id: string }) => movement.related_job_id),
+  );
+
   return (jobs ?? [])
-    .filter((job: any) => !reportedJobIds.has(job.job_id))
+    .filter((job: any) =>
+      (allocatedJobIds.has(job.job_id) ||
+        job.job_type === "maintenance" ||
+        (job.job_parts ?? []).some((part: any) => part.status === "reserved")) &&
+      !reportedJobIds.has(job.job_id)
+    )
     .map((job: any) => {
       const client = Array.isArray(job.clients) ? job.clients[0] : job.clients;
       const assignment = Array.isArray(job.job_technicians) ? job.job_technicians[0] : job.job_technicians;
       const technician = assignment && (Array.isArray(assignment.technicians) ? assignment.technicians[0] : assignment.technicians);
       const user = technician && (Array.isArray(technician.users) ? technician.users[0] : technician.users);
+      const reservedParts = (job.job_parts ?? [])
+        .filter((reservation: any) => reservation.status === "reserved")
+        .map((reservation: any) => {
+          const part = Array.isArray(reservation.parts) ? reservation.parts[0] : reservation.parts;
+          return {
+            jobPartId: reservation.job_part_id,
+            sku: part?.sku ?? "",
+            name: part?.name ?? "Reserved part",
+            quantity: reservation.quantity,
+          };
+        });
       return {
         jobId: job.job_id,
         jobNumber: job.job_number,
@@ -289,6 +417,7 @@ async function listFieldReportJobs(session: Record<string, unknown>) {
         technicianName: user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "Unassigned",
         serviceDate: String(job.scheduled_date),
         arrivalTime: String(job.scheduled_time ?? "").slice(0, 5),
+        reservedParts,
       };
     });
 }
@@ -299,6 +428,7 @@ async function listFieldReports(session: Record<string, unknown>) {
     .select(`
       report_id,
       report_number,
+      job_id,
       work_performed,
       service_date,
       time_arrival,
@@ -319,7 +449,89 @@ async function listFieldReports(session: Record<string, unknown>) {
 
   if (error) throw error;
 
-  return (reports ?? []).map((report: any) => {
+  const reportedJobIds = new Set((reports ?? []).map((report: any) => report.job_id));
+  const { data: reservedJobs, error: reservedJobsError } = await supabase
+    .from("jobs")
+    .select("job_id, job_number, job_type, branch, scheduled_date, scheduled_time, parts_confirmed_at, clients(name, address), job_parts!inner(job_part_id, quantity, status, reserved_at, parts(sku, name)), job_technicians(is_active, technicians(users(first_name, last_name)))")
+    .eq("parts_status", "confirmed")
+    .eq("job_parts.status", "reserved")
+    .neq("status", "cancelled")
+    .order("parts_confirmed_at", { ascending: false });
+  if (reservedJobsError) throw reservedJobsError;
+
+  const pendingReportItems = (reservedJobs ?? [])
+    .filter((job: any) => !reportedJobIds.has(job.job_id))
+    .map((job: any) => {
+      const client = Array.isArray(job.clients) ? job.clients[0] : job.clients;
+      const assignments = Array.isArray(job.job_technicians)
+        ? job.job_technicians
+        : job.job_technicians
+          ? [job.job_technicians]
+          : [];
+      const technicianNames = assignments
+        .filter((assignment: any) => assignment.is_active)
+        .map((assignment: any) => {
+          const technician = Array.isArray(assignment.technicians)
+            ? assignment.technicians[0]
+            : assignment.technicians;
+          const user = technician && (Array.isArray(technician.users)
+            ? technician.users[0]
+            : technician.users);
+          return user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "";
+        })
+        .filter(Boolean);
+      const reservedParts = (job.job_parts ?? [])
+        .filter((reservation: any) => reservation.status === "reserved")
+        .map((reservation: any) => {
+          const part = Array.isArray(reservation.parts) ? reservation.parts[0] : reservation.parts;
+          return {
+            sku: part?.sku ?? "",
+            description: part?.name ?? "Reserved part",
+            quantity: reservation.quantity,
+            note: "Reserved",
+          };
+        });
+      const reservedAt = job.job_parts?.[0]?.reserved_at ?? job.parts_confirmed_at ?? null;
+      const displayTime = reservedAt
+        ? new Date(reservedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+        : `${job.scheduled_date} ${String(job.scheduled_time ?? "").slice(0, 5)}`;
+
+      return {
+        id: `job:${job.job_number || job.job_id}`,
+        client: client?.name ?? "Unknown client",
+        service: job.job_type === "maintenance" ? "Preventive maintenance" : job.job_type === "installation" ? "Installation" : "Service call",
+        technician: technicianNames.join(", ") || "Unassigned",
+        time: displayTime,
+        status: "Awaiting Report",
+        tone: "gray",
+        isPendingReport: true,
+        workSummary: "Stock has been reserved. The assigned technician has not submitted a field report yet.",
+        parts: reservedParts,
+        images: [],
+        signature: {
+          signer: "Not provided",
+          signedAt: "Pending report",
+          method: "Awaiting technician report",
+        },
+        billing: {
+          readiness: "Awaiting field report",
+          inventory: "Reserved",
+          reference: job.job_number || "Not assigned",
+        },
+        audit: [
+          { time: displayTime, action: "Stock reserved for job", actor: "Inventory" },
+        ],
+        jobId: job.job_id,
+        siteAddress: client?.address ?? `${String(job.branch).replace(/^./, (letter: string) => letter.toUpperCase())} branch`,
+        issueDescription: "",
+        recommendations: "",
+        additionalNotes: "",
+        submittedAt: null,
+        reservedAt,
+      };
+    });
+
+  const submittedReportItems = (reports ?? []).map((report: any) => {
     const job = Array.isArray(report.jobs) ? report.jobs[0] : report.jobs;
     const client = job && (Array.isArray(job.clients) ? job.clients[0] : job.clients);
     const technician = Array.isArray(report.technicians) ? report.technicians[0] : report.technicians;
@@ -369,6 +581,11 @@ async function listFieldReports(session: Record<string, unknown>) {
       submittedAt: report.submitted_at ?? null,
     };
   });
+
+  return [...pendingReportItems, ...submittedReportItems].sort((left, right) =>
+    new Date(right.submittedAt ?? right.reservedAt ?? 0).getTime() -
+    new Date(left.submittedAt ?? left.reservedAt ?? 0).getTime(),
+  );
 }
 
 async function submitFieldReport(session: Record<string, unknown>, body: Record<string, any>) {
@@ -382,7 +599,7 @@ async function submitFieldReport(session: Record<string, unknown>, body: Record<
   const clientSignoff = Boolean(body.clientSignoff);
   const clientSignoffName = String(body.clientSignoffName ?? "").trim();
   const additionalNotes = String(body.additionalNotes ?? "").trim();
-  const parts = Array.isArray(body.parts) ? body.parts : [];
+  const partsUsed = Array.isArray(body.partsUsed) ? body.partsUsed : [];
   const attachments = Array.isArray(body.images) ? body.images : [];
 
   if (!jobId || !workPerformed || !serviceDate) {
@@ -402,82 +619,32 @@ async function submitFieldReport(session: Record<string, unknown>, body: Record<
     throw new Error("A field report has already been submitted for this job. Please submit a new report only when a new job is assigned.");
   }
 
-  const { data: report, error: reportError } = await supabase
-    .from("field_reports")
-    .insert({
-      job_id: jobId,
-      technician_id: technicianId,
-      work_performed: workPerformed,
-      issue_description: issueDescription || null,
-      recommendations: recommendations || null,
-      site_address: siteAddress || null,
-      service_date: serviceDate,
-      time_arrival: timeArrival || null,
-      client_signoff: clientSignoff,
-      client_signoff_name: clientSignoffName || null,
-      additional_notes: additionalNotes || null,
-      review_status: "submitted",
-      submitted_at: new Date().toISOString(),
-    })
-    .select("report_id, report_number")
-    .single();
+  const { data: report, error: reportError } = await supabase.rpc(
+    "gioms_submit_field_report_with_usage",
+    {
+      p_job_id: jobId,
+      p_technician_id: technicianId,
+      p_work_performed: workPerformed,
+      p_issue_description: issueDescription || null,
+      p_recommendations: recommendations || null,
+      p_site_address: siteAddress || null,
+      p_service_date: serviceDate,
+      p_time_arrival: timeArrival || null,
+      p_client_signoff: clientSignoff,
+      p_client_signoff_name: clientSignoffName || null,
+      p_additional_notes: additionalNotes || null,
+      p_used_parts: partsUsed.map((part: any) => ({
+        jobPartId: String(part?.jobPartId ?? ""),
+        quantity: Number(part?.quantity),
+      })),
+      p_attachments: attachments.map((attachment: any) => ({
+        fileUrl: String(attachment?.fileUrl ?? attachment?.url ?? attachment?.dataUrl ?? "").trim(),
+      })),
+    },
+  );
 
-  if (reportError) throw reportError;
-
-  if (attachments.length) {
-    const attachmentRows = attachments
-      .map((attachment: any) => {
-        const fileUrl = String(attachment?.fileUrl ?? attachment?.url ?? attachment?.dataUrl ?? "").trim();
-        if (!fileUrl) return null;
-        return {
-          report_id: report.report_id,
-          file_type: "photo",
-          file_url: fileUrl,
-        };
-      })
-      .filter(Boolean);
-
-    if (attachmentRows.length) {
-      const { error: attachmentError } = await supabase.from("report_attachments").insert(attachmentRows);
-      if (attachmentError) throw attachmentError;
-    }
-  }
-
-  if (parts.length) {
-    for (const part of parts) {
-      const sku = String(part.sku ?? "").trim();
-      const quantity = Number(part.quantity ?? 0);
-      if (!sku || !Number.isFinite(quantity) || quantity <= 0) continue;
-
-      const existingPart = await supabase.from("parts").select("part_id").eq("sku", sku).maybeSingle();
-      if (existingPart.error) throw existingPart.error;
-
-      let partId = existingPart.data?.part_id;
-      if (!partId) {
-        const createdPart = await supabase.from("parts").insert({
-          sku,
-          name: String(part.description ?? sku).trim() || sku,
-          category: "misc",
-          unit_of_measure: "pcs",
-          reorder_threshold: 0,
-          unit_cost: 0,
-          address: "n/a",
-          notes: "Added from field report",
-        }).select("part_id").single();
-        if (createdPart.error) throw createdPart.error;
-        partId = createdPart.data.part_id;
-      }
-
-      const { error: linkError } = await supabase.from("report_parts_used").insert({
-        report_id: report.report_id,
-        part_id: partId,
-        quantity,
-      });
-      if (linkError) throw linkError;
-    }
-  }
-
-  return { report: { id: report.report_id, number: report.report_number } };
+  if (reportError) throw new Error(reportError.message);
+  return { report: { id: report.reportId, number: report.reportNumber } };
 }
 
 
@@ -512,7 +679,8 @@ Deno.serve(async (request: Request) => {
     const canManageSchedule = schedulingActions.has(action) && isSchedulingRole(session.role);
     const canLoadFieldReports = fieldReportActions.has(action) && isFieldReportRole(session.role);
     const canManageInventory = inventoryActions.has(action) && ["Admin", "Warehouse Manager"].includes(session.role);
-    if (action !== "change-password" && !canManageSchedule && !canLoadFieldReports && !canManageInventory && session.role !== "Admin") return response({ error: "Administrator access is required." }, 403);
+    const canAllocateJobStock = jobAllocationActions.has(action) && (isSchedulingRole(session.role) || ["Admin", "Warehouse Manager"].includes(session.role));
+    if (action !== "change-password" && !canManageSchedule && !canLoadFieldReports && !canManageInventory && !canAllocateJobStock && session.role !== "Admin") return response({ error: "Administrator access is required." }, 403);
 
     if (action === "change-password") {
       const currentPassword = String(body.currentPassword ?? "");
@@ -576,11 +744,137 @@ Deno.serve(async (request: Request) => {
     if (action === "list-inventory") {
       const { data, error } = await supabase
         .from("stock")
-        .select("stock_id, part_id, branch, quantity_on_hand, parts!inner(part_id, sku, name, category, unit_of_measure, reorder_threshold, unit_cost, address, notes)")
+        .select("stock_id, part_id, branch, quantity_on_hand, quantity_reserved, parts!inner(part_id, sku, name, category, unit_of_measure, reorder_threshold, unit_cost, address, notes)")
         .order("branch")
         .order("stock_id");
       if (error) throw error;
       return response({ items: data ?? [] });
+    }
+
+    if (action === "list-pending-job-requests") {
+      return response({ jobs: await listPendingJobRequests() });
+    }
+
+    if (action === "list-job-allocation-history") {
+      return response({ allocations: await listJobAllocationHistory() });
+    }
+
+    if (action === "list-job-allocation-stock") {
+      const jobNumber = String(body.jobNumber ?? "").trim();
+      if (!jobNumber) return response({ error: "A work order number is required." }, 400);
+      const { data: job, error: jobError } = await supabase
+        .from("jobs")
+        .select("job_id, job_number, branch, scheduled_date, scheduled_time, status, parts_status, clients(name, address), job_technicians(is_active, technicians(users(first_name, last_name)))")
+        .eq("job_number", jobNumber)
+        .maybeSingle();
+      if (jobError) throw jobError;
+      if (!job) return response({ error: "Scheduled job not found." }, 404);
+      if (job.status === "cancelled") return response({ error: "Cancelled jobs cannot receive stock." }, 409);
+
+      const { data: existingMovements, error: existingMovementsError } = await supabase
+        .from("stock_movements")
+        .select("movement_id")
+        .eq("related_job_id", job.job_id)
+        .eq("reason", "job_usage")
+        .limit(1);
+      if (existingMovementsError) throw existingMovementsError;
+      if (existingMovements?.length || job.parts_status !== "pending") {
+        return response({
+          job: { jobId: job.job_id, jobNumber: job.job_number, allocated: true },
+          items: [],
+        });
+      }
+
+      const client = Array.isArray(job.clients) ? job.clients[0] : job.clients;
+      const assignments = (Array.isArray(job.job_technicians) ? job.job_technicians : [job.job_technicians]).filter((assignment: any) => assignment?.is_active);
+      const technicianNames = assignments.map((assignment: any) => {
+        const technician = Array.isArray(assignment.technicians) ? assignment.technicians[0] : assignment.technicians;
+        const user = technician && (Array.isArray(technician.users) ? technician.users[0] : technician.users);
+        return user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "Unknown technician";
+      });
+      const { data: items, error: inventoryError } = await supabase
+        .from("stock")
+        .select("stock_id, part_id, branch, quantity_on_hand, quantity_reserved, parts!inner(part_id, sku, name, category, unit_of_measure, reorder_threshold, unit_cost, address, notes)")
+        .eq("branch", job.branch)
+        .order("stock_id");
+      if (inventoryError) throw inventoryError;
+      return response({
+        job: {
+          jobId: job.job_id,
+          jobNumber: job.job_number,
+          branch: job.branch,
+          scheduledDate: String(job.scheduled_date),
+          scheduledTime: String(job.scheduled_time ?? "").slice(0, 5),
+          location: client?.address ?? `${String(job.branch).replace(/^./, (letter) => letter.toUpperCase())} branch`,
+          technicianName: technicianNames.length ? technicianNames.join(", ") : "Unassigned",
+        },
+        items: items ?? [],
+      });
+    }
+
+    if (action === "allocate-job-stock") {
+      const jobNumber = String(body.jobNumber ?? "").trim();
+      const requestedItems = Array.isArray(body.items) ? body.items : [];
+      const allocations = requestedItems.map((item: any) => ({
+        stockId: String(item?.stockId ?? ""),
+        quantity: Number(item?.quantity),
+      }));
+      if (!jobNumber || !allocations.length || allocations.length > 50 || allocations.some((item: any) => !item.stockId || !Number.isInteger(item.quantity) || item.quantity <= 0) || new Set(allocations.map((item: any) => item.stockId)).size !== allocations.length) {
+        return response({ error: "Select valid stock items and quantities for this job." }, 400);
+      }
+
+      const { data: job, error: jobError } = await supabase
+        .from("jobs")
+        .select("job_id, branch, status, parts_status")
+        .eq("job_number", jobNumber)
+        .maybeSingle();
+      if (jobError) throw jobError;
+      if (!job) return response({ error: "Scheduled job not found." }, 404);
+      if (job.status === "cancelled") return response({ error: "Cancelled jobs cannot receive stock." }, 409);
+      if (job.parts_status !== "pending") return response({ error: "Stock has already been reserved for this job." }, 409);
+
+      const { data: existingMovements, error: existingMovementsError } = await supabase
+        .from("stock_movements")
+        .select("movement_id")
+        .eq("related_job_id", job.job_id)
+        .eq("reason", "job_usage")
+        .limit(1);
+      if (existingMovementsError) throw existingMovementsError;
+      if (existingMovements?.length) return response({ error: "Stock has already been allocated to this job." }, 409);
+
+      const { data: stockRows, error: stockError } = await supabase
+        .from("stock")
+        .select("stock_id, part_id, branch, quantity_on_hand, quantity_reserved")
+        .in("stock_id", allocations.map((item: any) => item.stockId));
+      if (stockError) throw stockError;
+      if ((stockRows ?? []).length !== allocations.length || stockRows.some((stock: any) => stock.branch !== job.branch)) {
+        return response({ error: "One or more selected items are unavailable at the job's branch." }, 409);
+      }
+      const stockById = new Map<string, { part_id: string; quantity_on_hand: number; quantity_reserved: number }>();
+      (stockRows ?? []).forEach((stock: any) => stockById.set(stock.stock_id, stock));
+      for (const item of allocations) {
+        const stock = stockById.get(item.stockId);
+        if (!stock) return response({ error: "One or more selected items are unavailable at the job's branch." }, 409);
+        if (item.quantity > stock.quantity_on_hand - stock.quantity_reserved) {
+          return response({ error: "An issue quantity exceeds the available stock." }, 400);
+        }
+      }
+
+      const { data: reservation, error: reservationError } = await supabase.rpc(
+        "gioms_reserve_job_stock",
+        {
+          p_job_number: jobNumber,
+          p_items: allocations.map((item: any) => ({
+            stockId: item.stockId,
+            quantity: item.quantity,
+          })),
+          p_reserved_by: String(session.sub ?? ""),
+        },
+      );
+      if (reservationError) {
+        return response({ error: reservationError.message }, 409);
+      }
+      return response(reservation ?? { message: "Stock reserved for the job." });
     }
 
     if (["create-inventory-item", "update-inventory-item"].includes(action)) {
@@ -729,8 +1023,15 @@ Deno.serve(async (request: Request) => {
     }
 
     if (action === "submit-field-report") {
-      const result = await submitFieldReport(session, body || {});
-      return response(result, 201);
+      try {
+        const result = await submitFieldReport(session, body || {});
+        return response(result, 201);
+      } catch (error) {
+        console.error("Field report submission failed:", error);
+        return response({
+          error: error instanceof Error ? error.message : "Unable to submit the field report.",
+        }, 400);
+      }
     }
     
 
@@ -747,8 +1048,9 @@ Deno.serve(async (request: Request) => {
       const startTime = String(body.startTime ?? "");
       const endTime = String(body.endTime ?? "");
       const branch = String(body.branch ?? "").trim().toLowerCase();
-      const technicianIds = Array.isArray(body.technicianIds) ? [...new Set(body.technicianIds.map(String).filter(Boolean))] : [];
+      const technicianIds: string[] = Array.isArray(body.technicianIds) ? [...new Set<string>(body.technicianIds.map(String).filter(Boolean))] : [];
       if (!order || !date || !startTime || !endTime || !["makati", "cebu"].includes(branch) || new Date(`${date}T${endTime}`) <= new Date(`${date}T${startTime}`)) return response({ error: "Please provide a valid date, branch, and time range." }, 400);
+      if (!(await hasOnlyActiveTechnicianRole(technicianIds))) return response({ error: "Only active users with the Technician role can be assigned." }, 400);
       if (technicianIds.length) {
         const { data: booked, error: bookedError } = await supabase.from("job_technicians").select("technician_id, jobs!inner(job_number, scheduled_date, status)").eq("jobs.scheduled_date", date).neq("jobs.status", "cancelled").eq("is_active", true).neq("jobs.job_number", order).in("technician_id", technicianIds);
         if (bookedError) throw bookedError;
@@ -761,7 +1063,7 @@ Deno.serve(async (request: Request) => {
       if (Array.isArray(body.technicianIds)) {
         const { data: existingAssignments, error: assignmentsError } = await supabase.from("job_technicians").select("technician_id, is_active").eq("job_id", job.job_id);
         if (assignmentsError) throw assignmentsError;
-        const existingById = new Map((existingAssignments ?? []).map((assignment: { technician_id: string | number; is_active: boolean }) => [assignment.technician_id, assignment.is_active]));
+        const existingById = new Map<string, boolean>((existingAssignments ?? []).map((assignment: { technician_id: string; is_active: boolean }) => [assignment.technician_id, assignment.is_active] as const));
         const selectedIds = new Set(technicianIds);
         const toInsert = technicianIds.filter((technicianId) => !existingById.has(technicianId));
         const toActivate = technicianIds.filter((technicianId) => existingById.has(technicianId) && !existingById.get(technicianId));
@@ -795,8 +1097,9 @@ Deno.serve(async (request: Request) => {
       const startTime = String(body.startTime ?? "");
       const endTime = String(body.endTime ?? "");
       const branch = String(body.branch ?? "").trim().toLowerCase();
-      const technicianIds = Array.isArray(body.technicianIds) ? [...new Set(body.technicianIds.map(String).filter(Boolean))] : [];
+      const technicianIds: string[] = Array.isArray(body.technicianIds) ? [...new Set<string>(body.technicianIds.map(String).filter(Boolean))] : [];
       if (!firstName || !lastName || !address || !contactEmail || !phoneNumber || !date || !startTime || !endTime || !["makati", "cebu"].includes(branch) || new Date(`${date}T${endTime}`) <= new Date(`${date}T${startTime}`)) return response({ error: "Please provide all required job details and a valid time range." }, 400);
+      if (!(await hasOnlyActiveTechnicianRole(technicianIds))) return response({ error: "Only active users with the Technician role can be assigned." }, 400);
 
       if (technicianIds.length) {
         const { data: booked, error: bookedError } = await supabase.from("job_technicians").select("technician_id, jobs!inner(scheduled_date, status)").eq("jobs.scheduled_date", date).neq("jobs.status", "cancelled").eq("is_active", true).in("technician_id", technicianIds);
