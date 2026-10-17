@@ -46,14 +46,14 @@ function TopBar() {
   });
 
   return (
-    <header className="sticky top-0 z-20 flex h-16 items-center justify-between bg-[#fffaf9] px-6 shadow-[0_2px_5px_rgb(27_54_79_/_15%)] max-[1024px]:pl-16">
-      <div>
-        <p className="m-0 text-[10px] font-bold uppercase tracking-[.12em] text-[#7c8186]">
+    <header className="sticky top-0 z-20 flex h-14 items-center justify-between bg-[#fffaf9] px-3 shadow-[0_2px_5px_rgb(27_54_79_/_15%)] max-[1024px]:pl-16 max-[1024px]:pr-3 max-[480px]:pl-16 max-[480px]:pr-2">
+      <div className="min-w-0 flex-1">
+        <p className="m-0 truncate text-[10px] font-bold uppercase tracking-[.12em] text-[#7c8186] max-[620px]:text-[9px] max-[480px]:text-[8px]">
           Guard All / Makati - Metro Manila
         </p>
-        <strong className="text-[13px] text-[#202a35]">
-          {date}
-          <span className="px-2 text-[#9ca3aa]">•</span>
+        <strong className="block truncate text-[13px] text-[#202a35] max-[620px]:text-[11px] max-[480px]:text-[10px]">
+          <span className="max-[480px]:hidden">{date}</span>
+          <span className="px-2 text-[#9ca3aa] max-[480px]:hidden">•</span>
           {time}
         </strong>
       </div>
@@ -73,7 +73,7 @@ function TopBar() {
         </button>
 
         {isOpen && (
-          <div className="absolute right-0 mt-2 w-80 rounded-xl border border-[#dfe6ec] bg-white p-4 shadow-[0_10px_25px_rgba(0,0,0,0.12)]">
+          <div className="absolute right-0 mt-2 w-80 rounded-xl border border-[#dfe6ec] bg-white p-4 shadow-[0_10px_25px_rgba(0,0,0,0.12)] max-w-[calc(100vw-2rem)]">
             <div className="mb-3 flex items-center justify-between border-b border-[#f0f4f8] pb-2">
               <h3 className="m-0 text-[14px] font-bold text-[#174f9a]">
                 Notifications

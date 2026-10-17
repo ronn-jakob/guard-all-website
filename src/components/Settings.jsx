@@ -17,21 +17,17 @@ function Settings() {
     ? `profilePhoto:${sessionUser.id}`
     : "profilePhoto";
   const [profile, setProfile] = useState(() => ({
-    ...splitDisplayName(
-      sessionUser?.name || localStorage.getItem("profileName") || "",
-    ),
-    email: sessionUser?.email || localStorage.getItem("profileEmail") || "",
-    phone: localStorage.getItem("profilePhone") || "",
-    title: sessionUser?.role || localStorage.getItem("profileTitle") || "",
+    ...splitDisplayName(sessionUser?.name || ""),
+    email: sessionUser?.email || "",
+    phone: sessionUser?.phone || "",
+    title: sessionUser?.title || "",
   }));
   const [formError, setFormError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [profileMessage, setProfileMessage] = useState("");
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profilePhoto, setProfilePhoto] = useState(
-    () =>
-      localStorage.getItem(profilePhotoKey) ||
-      localStorage.getItem("profilePhoto") ||
-      "",
+    () => localStorage.getItem(profilePhotoKey) || "",
   );
   const [showPasswords, setShowPasswords] = useState(false);
 
@@ -62,40 +58,47 @@ function Settings() {
     setProfileMessage("Profile photo removed.");
   };
 
-  const handleProfileSave = (event) => {
+  const handleProfileSave = async (event) => {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const firstName = formData.get("firstName").trim();
-    const lastName = formData.get("lastName").trim();
-    const nextProfile = {
-      firstName,
-      lastName,
-      email: formData.get("email").trim().toLowerCase(),
-      phone: formData.get("phone").trim(),
-      title: formData.get("title").trim(),
-    };
-
-    setProfile(nextProfile);
-    localStorage.setItem(
-      "profileName",
-      [firstName, lastName].filter(Boolean).join(" "),
-    );
-    localStorage.setItem("profileEmail", nextProfile.email);
-    localStorage.setItem("profilePhone", nextProfile.phone);
-    localStorage.setItem("profileTitle", nextProfile.title);
-    const currentSession = getSession();
-    if (currentSession?.user) {
-      setSession({
-        ...currentSession,
-        user: {
-          ...currentSession.user,
-          name: [firstName, lastName].filter(Boolean).join(" "),
-          email: nextProfile.email,
-        },
+    setProfileMessage("");
+    setFormError("");
+    setIsSavingProfile(true);
+    try {
+      const { profile: savedProfile } = await callAuthFunction("update-profile", {
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        email: profile.email,
+        phone: profile.phone,
+        title: profile.title,
       });
-      window.dispatchEvent(new Event("account-updated"));
+
+      setProfile({
+        ...splitDisplayName(savedProfile.name),
+        email: savedProfile.email,
+        phone: savedProfile.phone,
+        title: savedProfile.title,
+      });
+
+      const currentSession = getSession();
+      if (currentSession?.user) {
+        setSession({
+          ...currentSession,
+          user: {
+            ...currentSession.user,
+            name: savedProfile.name,
+            email: savedProfile.email,
+            phone: savedProfile.phone,
+            title: savedProfile.title,
+          },
+        });
+        window.dispatchEvent(new Event("account-updated"));
+      }
+      setProfileMessage("Personal information saved.");
+    } catch (error) {
+      setFormError(error.message);
+    } finally {
+      setIsSavingProfile(false);
     }
-    setProfileMessage("Personal information saved.");
   };
 
   const handlePasswordChange = async (event) => {
@@ -129,7 +132,7 @@ function Settings() {
   return (
     <main className="flex h-screen overflow-hidden bg-[#202123] font-sans text-[#174f9a] max-[1024px]:block">
       <Sidebar />
-      <section className="h-screen min-w-0 flex-1 overflow-y-auto bg-[#edf7ff]">
+      <section className="h-screen w-full min-w-0 flex-1 overflow-y-auto bg-[#edf7ff] max-[1024px]:h-[100dvh]">
         <TopBar />
         <div className="px-8 pb-8 pt-8 max-[1024px]:px-6 max-[1024px]:pb-20 max-[1024px]:pt-5 max-[620px]:px-3">
           <header className="mb-7 max-[620px]:mb-4">
@@ -265,11 +268,13 @@ function Settings() {
                 <label className="flex flex-col gap-1.5 text-[12px] font-semibold text-[#45515c]">
                   Job title
                   <input
-                    className="h-11 cursor-default rounded-[6px] border border-[#d6dee6] bg-[#f8fbff] px-3 text-[13px] text-[#273746] outline-none"
+                    className="h-11 rounded-[6px] border border-[#d6dee6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
                     name="title"
                     value={profile.title}
-                    readOnly
-                    required
+                    onChange={(event) =>
+                      setProfile({ ...profile, title: event.target.value })
+                    }
+                    placeholder="e.g. Service Manager"
                   />
                 </label>
                 {profileMessage && (
@@ -282,13 +287,14 @@ function Settings() {
                 )}
                 <div className="col-span-full grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
                   <button
-                    className="col-start-2 flex h-11 w-full items-center justify-center gap-2 rounded-[6px] border-0 bg-[#1250a0] px-4 text-[13px] font-bold text-white transition hover:bg-[#0e4389] max-[620px]:col-start-1"
+                    className="col-start-2 flex h-11 w-full items-center justify-center gap-2 rounded-[6px] border-0 bg-[#1250a0] px-4 text-[13px] font-bold text-white transition hover:bg-[#0e4389] disabled:cursor-wait disabled:opacity-60 max-[620px]:col-start-1"
                     type="submit"
+                    disabled={isSavingProfile}
                   >
                     <span className="material-symbols-outlined text-[18px]">
                       save
                     </span>
-                    Save personal information
+                    {isSavingProfile ? "Saving..." : "Save personal information"}
                   </button>
                 </div>
               </form>

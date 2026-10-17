@@ -27,12 +27,21 @@ function Sidebar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profilePhoto, setProfilePhoto] = useState(
-    () =>
-      localStorage.getItem(profilePhotoKey) ||
-      localStorage.getItem("profilePhoto") ||
-      "",
+    () => localStorage.getItem(profilePhotoKey) || "",
   );
   const navigate = useNavigate();
+
+  // Body scroll lock when mobile sidebar is open
+  useEffect(() => {
+    if (menuOpen) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     const handleProfileUpdate = () => {
@@ -78,6 +87,16 @@ function Sidebar() {
           {menuOpen ? "close" : "menu"}
         </span>
       </button>
+      
+      {/* Mobile backdrop overlay */}
+      {menuOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 max-[1024px]:block max-[1024px]:pointer-events-auto"
+          onClick={() => setMenuOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      
       <div
         className={`px-[18px] py-7 max-[1024px]:pointer-events-auto max-[1024px]:fixed max-[1024px]:bottom-0 max-[1024px]:left-0 max-[1024px]:top-0 max-[1024px]:z-40 max-[1024px]:w-[260px] max-[1024px]:border-r max-[1024px]:border-white/15 max-[1024px]:bg-[#174f9a] max-[1024px]:p-3 max-[1024px]:pt-16 max-[1024px]:shadow-[6px_0_18px_rgb(4_35_78_/_22%)] ${menuOpen ? "" : "max-[1024px]:hidden"}`}
       >

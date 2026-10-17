@@ -2,13 +2,33 @@ import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { callAuthFunction } from "../lib/auth.js";
+import { callAuthFunction, getSession } from "../lib/auth.js";
 
 const input =
   "mt-1 h-10 w-full rounded-[5px] border border-[#cbd8e7] bg-[#eef4ff] px-3 text-[14px] text-[#4d6075] outline-none";
 const card =
   "rounded-[10px] border border-[#dfe6ec] bg-white p-3 shadow-[0_2px_5px_rgb(31_59_82_/_8%)]";
 const label = "text-[12px] font-bold uppercase tracking-[.06em] text-[#778593]";
+
+const reportStatusStyles = {
+  orange: "border-[#ff9f8f] bg-[#ffe5df] text-[#e05b45]",
+  gray: "border-[#c8c8c8] bg-[#f3f3f3] text-[#858585]",
+  green: "border-[#73c481] bg-[#e1f6e4] text-[#388b47]",
+  yellow: "border-[#e8cc70] bg-[#fdf5dd] text-[#8a6d1a]",
+};
+
+function ReportField({ fieldLabel, value }) {
+  return (
+    <div className="rounded-[6px] border border-[#e1e6eb] bg-[#f8fbff] px-3 py-2">
+      <span className="block text-[11px] font-bold uppercase tracking-[.06em] text-[#7d8994]">
+        {fieldLabel}
+      </span>
+      <strong className="mt-1 block text-[13px] font-semibold text-[#174276]">
+        {value || "—"}
+      </strong>
+    </div>
+  );
+}
 
 function FieldReports() {
   const navigate = useNavigate();
@@ -35,6 +55,50 @@ function FieldReports() {
     clientSignoff: false,
     clientSignoffName: "",
   });
+
+  const viewerRole = getSession()?.user?.role;
+  const canFilterByTechnician = [
+    "Admin",
+    "Service Manager",
+    "Sales Manager",
+  ].includes(viewerRole);
+  const [technicianFilter, setTechnicianFilter] = useState("");
+  const [technicianOptions, setTechnicianOptions] = useState([]);
+  const [submittedReports, setSubmittedReports] = useState([]);
+  const [isLoadingSubmittedReports, setIsLoadingSubmittedReports] =
+    useState(true);
+  const [submittedReportsError, setSubmittedReportsError] = useState("");
+  const [openReport, setOpenReport] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+    callAuthFunction(
+      "list-field-reports",
+      technicianFilter ? { technicianId: technicianFilter } : {},
+    )
+      .then(({ reports: incomingReports = [], technicians: incomingTechnicians = [] }) => {
+        if (!isMounted) return;
+        // Only already-submitted reports belong in this list; jobs that are still
+        // waiting on a report stay in the picker above.
+        setSubmittedReports(
+          (Array.isArray(incomingReports) ? incomingReports : []).filter(
+            (report) => !report.isPendingReport,
+          ),
+        );
+        setTechnicianOptions(
+          Array.isArray(incomingTechnicians) ? incomingTechnicians : [],
+        );
+      })
+      .catch((error) => {
+        if (isMounted) setSubmittedReportsError(error.message);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingSubmittedReports(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [technicianFilter]);
 
   useEffect(() => {
     let isMounted = true;
@@ -198,7 +262,7 @@ function FieldReports() {
   return (
     <main className="flex h-screen overflow-hidden bg-[#1f2022] font-sans text-[#063b7c] max-[1024px]:block">
       <Sidebar />
-      <section className="h-screen min-w-0 flex-1 overflow-y-auto bg-[#edf7ff]">
+      <section className="h-screen w-full min-w-0 flex-1 overflow-y-auto bg-[#edf7ff] max-[1024px]:h-[100dvh]">
         <TopBar />
         <div className="px-8 pb-6 pt-7 max-[1024px]:px-6 max-[1024px]:pb-20 max-[1024px]:pt-5 max-[620px]:px-3">
           <header className="mb-5 flex items-start justify-between max-[620px]:gap-3">
@@ -273,6 +337,96 @@ function FieldReports() {
               <p className="mb-0 mt-3 text-[13px] text-[#778593]">
                 No assigned jobs are available.
               </p>
+            )}
+          </section>
+
+          <section className={`${card} mb-3`}>
+            <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+              <div>
+                <p className="m-0 text-[13px] font-bold text-[#68798a]">
+                  SUBMITTED REPORTS
+                </p>
+                <p className="mb-0 mt-1 text-[13px] text-[#8290a0]">
+                  {canFilterByTechnician
+                    ? technicianFilter
+                      ? "Reports filed by the selected technician."
+                      : "Every report filed so far."
+                    : "Reports you have already submitted."}
+                </p>
+              </div>
+              {canFilterByTechnician && (
+                <label className="flex items-center gap-2 text-[12px] font-semibold text-[#45515c] max-[620px]:w-full">
+                  Technician
+                  <select
+                    className={`${input} mt-0 h-10 w-[200px] max-[620px]:w-full`}
+                    value={technicianFilter}
+                    onChange={(event) => setTechnicianFilter(event.target.value)}
+                  >
+                    <option value="">All technicians</option>
+                    {technicianOptions.map((option) => (
+                      <option key={option.id} value={option.id}>
+                        {option.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+
+            {submittedReportsError && (
+              <p
+                className="m-0 mb-3 rounded-[5px] border border-[#f0b8b0] bg-[#fff1ee] px-3 py-2 text-[12px] text-[#b64132]"
+                role="alert"
+              >
+                {submittedReportsError}
+              </p>
+            )}
+
+            {isLoadingSubmittedReports ? (
+              <p className="mb-0 text-[13px] text-[#778593]">
+                Loading submitted reports...
+              </p>
+            ) : submittedReports.length === 0 ? (
+              <p className="mb-0 text-[13px] text-[#778593]">
+                {technicianFilter
+                  ? "This technician has not submitted any reports yet."
+                  : "No reports have been submitted yet."}
+              </p>
+            ) : (
+              <div className="divide-y divide-[#e5ebf1]">
+                {submittedReports.map((report) => (
+                  <button
+                    key={report.id}
+                    type="button"
+                    onClick={() => setOpenReport(report)}
+                    className="flex w-full items-center gap-3 py-3 text-left transition-colors hover:bg-[#f7faff]"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <strong className="block truncate text-[14px] text-[#174f9a]">
+                        {report.client}
+                      </strong>
+                      <span className="mt-0.5 block truncate text-[12px] text-[#778593]">
+                        {report.id} · {report.service} · {report.time}
+                      </span>
+                      {canFilterByTechnician && !technicianFilter && (
+                        <span className="mt-0.5 block truncate text-[11px] text-[#8b99aa]">
+                          {report.technician}
+                        </span>
+                      )}
+                    </span>
+                    <span
+                      className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-bold ${
+                        reportStatusStyles[report.tone] ?? reportStatusStyles.gray
+                      }`}
+                    >
+                      {report.status}
+                    </span>
+                    <span className="material-symbols-outlined shrink-0 text-[20px] text-[#a6afb8]">
+                      chevron_right
+                    </span>
+                  </button>
+                ))}
+              </div>
             )}
           </section>
 
@@ -603,6 +757,198 @@ function FieldReports() {
           )}
         </div>
       </section>
+
+      {openReport && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#071426]/65 p-4 max-[620px]:items-end max-[620px]:p-0"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setOpenReport(null);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="submitted-report-title"
+            className="flex max-h-[92vh] w-full max-w-[880px] flex-col overflow-hidden rounded-[10px] bg-white text-[#174276] shadow-[0_20px_60px_rgb(7_20_38_/_35%)] max-[620px]:max-h-[95vh] max-[620px]:rounded-b-none max-[620px]:rounded-t-[12px]"
+          >
+            <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[#e1e6eb] px-6 py-5 max-[620px]:px-4">
+              <div className="min-w-0">
+                <p className="m-0 text-[11px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
+                  {openReport.id} · {openReport.status}
+                </p>
+                <h2
+                  id="submitted-report-title"
+                  className="m-0 mt-1 text-[22px] font-bold"
+                >
+                  {openReport.client}
+                </h2>
+                <p className="m-0 mt-1 text-[12px] text-[#7d8994]">
+                  {openReport.service} · {openReport.technician}
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Close report details"
+                onClick={() => setOpenReport(null)}
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-[6px] border border-[#dfe6ec] bg-white text-[23px] leading-none text-[#718090] hover:bg-[#f4f8ff]"
+              >
+                ×
+              </button>
+            </header>
+
+            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5 max-[620px]:px-4">
+              <section className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
+                <ReportField
+                  fieldLabel="Service date"
+                  value={openReport.serviceDate}
+                />
+                <ReportField
+                  fieldLabel="Time on site"
+                  value={openReport.arrivalTime}
+                />
+                <ReportField fieldLabel="Submitted" value={openReport.time} />
+                <ReportField
+                  fieldLabel="Billing readiness"
+                  value={openReport.billing?.readiness}
+                />
+                <ReportField
+                  fieldLabel="Site address"
+                  value={openReport.siteAddress}
+                />
+                <ReportField
+                  fieldLabel="Client sign-off"
+                  value={openReport.signature?.signer}
+                />
+              </section>
+
+              <section>
+                <h3 className="m-0 text-[12px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
+                  Work summary
+                </h3>
+                <p className="m-0 mt-2 text-[13px] leading-relaxed text-[#52677c]">
+                  {openReport.workSummary}
+                </p>
+              </section>
+
+              {(openReport.issueDescription ||
+                openReport.recommendations ||
+                openReport.additionalNotes) && (
+                <section className="space-y-3">
+                  {openReport.issueDescription && (
+                    <div>
+                      <h3 className="m-0 text-[12px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
+                        Issue found
+                      </h3>
+                      <p className="m-0 mt-1 text-[13px] leading-relaxed text-[#52677c]">
+                        {openReport.issueDescription}
+                      </p>
+                    </div>
+                  )}
+                  {openReport.recommendations && (
+                    <div>
+                      <h3 className="m-0 text-[12px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
+                        Recommendations
+                      </h3>
+                      <p className="m-0 mt-1 text-[13px] leading-relaxed text-[#52677c]">
+                        {openReport.recommendations}
+                      </p>
+                    </div>
+                  )}
+                  {openReport.additionalNotes && (
+                    <div>
+                      <h3 className="m-0 text-[12px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
+                        Additional notes
+                      </h3>
+                      <p className="m-0 mt-1 text-[13px] leading-relaxed text-[#52677c]">
+                        {openReport.additionalNotes}
+                      </p>
+                    </div>
+                  )}
+                </section>
+              )}
+
+              <section>
+                <h3 className="m-0 text-[12px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
+                  Parts used
+                </h3>
+                {openReport.parts.length === 0 ? (
+                  <p className="m-0 mt-2 text-[12px] text-[#8b949c]">
+                    No parts were recorded for this report.
+                  </p>
+                ) : (
+                  <div className="mt-2 overflow-x-auto rounded-[7px] border border-[#dfe6ec]">
+                    <table className="w-full min-w-[420px] border-collapse text-left text-[12px]">
+                      <thead className="bg-[#f3f7fd] text-[#68798a]">
+                        <tr>
+                          <th className="px-3 py-2 font-bold">Item</th>
+                          <th className="px-3 py-2 font-bold">Description</th>
+                          <th className="px-3 py-2 font-bold">Qty</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {openReport.parts.map((part, index) => (
+                          <tr
+                            className="border-t border-[#e8edf2]"
+                            key={`${part.sku}-${index}`}
+                          >
+                            <td className="px-3 py-2 font-bold text-[#35649a]">
+                              {part.sku}
+                            </td>
+                            <td className="px-3 py-2 text-[#52677c]">
+                              {part.description}
+                            </td>
+                            <td className="px-3 py-2 text-[#52677c]">
+                              {part.quantity}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+
+              {openReport.images.length > 0 && (
+                <section>
+                  <h3 className="m-0 text-[12px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
+                    Attached images
+                  </h3>
+                  <div className="mt-2 grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
+                    {openReport.images.map((image, index) => (
+                      <figure
+                        className="m-0 overflow-hidden rounded-[7px] border border-[#dfe6ec] bg-[#f3f7fd]"
+                        key={`${image.name}-${index}`}
+                      >
+                        {image.src ? (
+                          <img
+                            className="h-[190px] w-full object-cover"
+                            src={image.src}
+                            alt={image.alt}
+                            loading="lazy"
+                          />
+                        ) : null}
+                        <figcaption className="px-3 py-2 text-[11px] text-[#68798a]">
+                          {image.name}
+                        </figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+
+            <footer className="flex shrink-0 justify-end border-t border-[#e1e6eb] bg-[#f8fbff] px-6 py-4 max-[620px]:px-4">
+              <button
+                type="button"
+                onClick={() => setOpenReport(null)}
+                className="rounded-[6px] bg-[#1250a0] px-5 py-2.5 text-[12px] font-bold text-white hover:bg-[#0d438a]"
+              >
+                Close
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
     </main>
   );
 }

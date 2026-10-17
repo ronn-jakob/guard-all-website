@@ -150,7 +150,7 @@ function SalesBilling() {
   return (
     <main className="flex h-screen overflow-hidden bg-[#1f2022] font-sans text-[#063b7c] max-[1024px]:block">
       <Sidebar />
-      <section className="h-screen min-w-0 flex-1 overflow-y-auto bg-[#edf7ff]">
+      <section className="h-screen w-full min-w-0 flex-1 overflow-y-auto bg-[#edf7ff] max-[1024px]:h-[100dvh]">
         <TopBar />
 
         <div className="px-8 pb-6 pt-8 max-[1024px]:px-6 max-[1024px]:pb-20 max-[1024px]:pt-5 max-[620px]:px-3">
@@ -185,7 +185,7 @@ function SalesBilling() {
 
               {/* Calendar Filter Popover */}
               {showCalendar && (
-                <div className="absolute right-36 top-12 z-40 w-72 rounded-xl border border-[#dfe6ec] bg-white p-4 shadow-xl max-[620px]:right-0 max-[620px]:top-10">
+                <div className="absolute right-0 top-12 z-40 w-72 rounded-xl border border-[#dfe6ec] bg-white p-4 shadow-xl max-[620px]:top-10 max-[620px]:w-[calc(100vw-2rem)]">
                   <div className="mb-3 flex items-center justify-between border-b border-[#e1e6eb] pb-2">
                     <span className="text-[12px] font-bold text-[#174f9a]">
                       Filter by Issue Date

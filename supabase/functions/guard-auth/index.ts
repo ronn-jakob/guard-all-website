@@ -63,6 +63,14 @@ async function hashPassword(password: string) {
   return `pbkdf2_sha256$${iterations}$${toBase64Url(salt)}$${toBase64Url(hash)}`;
 }
 
+// Ambiguous characters (0/O, 1/l/I) are omitted so a temporary password can be
+// read aloud or copied by hand without transcription errors.
+function generateTemporaryPassword() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  return Array.from(bytes, (byte) => alphabet[byte % alphabet.length]).join("");
+}
+
 async function verifyPassword(password: string, storedHash: string) {
   const [algorithm, iterationText, saltText, hashText] = storedHash.split("$");
   if (algorithm !== "pbkdf2_sha256" || !iterationText || !saltText || !hashText) return false;
@@ -91,7 +99,20 @@ async function verifyToken(request: Request) {
   const valid = await crypto.subtle.verify("HMAC", key, fromBase64Url(signature), encoder.encode(`${header}.${body}`));
   if (!valid) return null;
   const payload = JSON.parse(decoder.decode(fromBase64Url(body)));
-  return payload.exp > Math.floor(Date.now() / 1000) ? payload : null;
+  if (!(payload.exp > Math.floor(Date.now() / 1000))) return null;
+
+  // A valid signature alone is not enough. The account must still be active, and
+  // the role is read from the database so that deactivation or a role change
+  // takes effect immediately instead of only after the token expires.
+  const { data: account, error } = await supabase
+    .from("users")
+    .select("is_active, roles(role_name)")
+    .eq("user_id", payload.sub)
+    .maybeSingle();
+  if (error) throw error;
+  if (!account?.is_active) return null;
+  const role = Array.isArray(account.roles) ? account.roles[0]?.role_name : account.roles?.role_name;
+  return { ...payload, role: role ?? payload.role };
 }
 
 async function ensureRole(roleName: string) {
@@ -121,7 +142,7 @@ async function ensureRoles() {
 
 async function userResponse(user: Record<string, unknown>, roleName: string) {
   const token = await signToken({ sub: user.user_id, role: roleName, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 8 });
-  return { token, user: { id: user.user_id, name: [user.first_name, user.last_name].filter(Boolean).join(" "), email: user.email, branch: user.branch, role: roleName } };
+  return { token, user: { id: user.user_id, name: [user.first_name, user.last_name].filter(Boolean).join(" "), email: user.email, branch: user.branch, role: roleName, phone: user.phone ?? "", title: user.title ?? "" } };
 }
 
 function response(body: unknown, status = 200) {
@@ -132,15 +153,28 @@ function isSchedulingRole(role: string) {
   return rolePermissions[role]?.some(([module]) => module === "scheduling") ?? false;
 }
 
-const schedulingActions = new Set(["list-technicians", "list-schedules", "create-schedule", "get-schedule", "update-schedule"]);
+const schedulingActions = new Set(["list-technicians", "list-schedules", "create-schedule", "get-schedule", "update-schedule", "confirm-job-assignment"]);
 const fieldReportActions = new Set(["list-field-report-jobs", "list-field-reports", "submit-field-report"]);
 const inventoryActions = new Set(["list-inventory", "create-inventory-item", "adjust-inventory-stock", "update-inventory-item"]);
 const jobAllocationActions = new Set(["list-pending-job-requests", "list-job-allocation-stock", "allocate-job-stock", "list-job-allocation-history"]);
+// Actions a signed-in user may perform on their own account, bypassing the module role check.
+const selfServiceActions = new Set(["change-password", "update-profile"]);
 
 function jobTypeFor(serviceType: string) {
   if (serviceType === "Installation") return "installation";
   if (serviceType === "Preventive maintenance") return "maintenance";
+  if (serviceType === "Inspection") return "inspection";
   return "repair";
+}
+
+// Single source of truth for presenting job_type. Previously this ternary was
+// duplicated at every call site, so a new job type could be added to the enum
+// and the write path while the read paths silently reported "Service call".
+function serviceLabelFor(jobType: unknown) {
+  if (jobType === "installation") return "Installation";
+  if (jobType === "maintenance") return "Preventive maintenance";
+  if (jobType === "inspection") return "Inspection";
+  return "Service call";
 }
 
 async function ensureTechnicianRecord(user: Record<string, unknown>) {
@@ -211,7 +245,7 @@ async function hasOnlyActiveTechnicianRole(technicianIds: string[]) {
 async function listSchedules() {
   const { data: jobs, error } = await supabase
     .from("jobs")
-    .select("job_id, job_number, job_type, status, branch, scheduled_date, scheduled_time, clients(name, address), job_technicians(technician_id, is_active, technicians(users(first_name, last_name)))")
+    .select("job_id, job_number, job_type, status, branch, scheduled_date, scheduled_time, parts_status, assignment_confirmed_at, clients(name, address), job_technicians(technician_id, is_active, technicians(users(first_name, last_name)))")
     .neq("status", "cancelled")
     .order("scheduled_date")
     .order("scheduled_time");
@@ -239,11 +273,13 @@ async function listSchedules() {
       time,
       dayLabel: new Date(`${date}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" }).toUpperCase(),
       client: client?.name ?? "Unnamed client",
-      service: job.job_type === "maintenance" ? "Preventive maintenance" : job.job_type === "installation" ? "Installation" : "Service call",
+      service: serviceLabelFor(job.job_type),
       location: client?.address ?? `${String(job.branch).replace(/^./, (letter) => letter.toUpperCase())} branch`,
       technician: technicians.length ? technicians.map((technician: { name: string }) => technician.name).join(", ") : "Unassigned",
       technicians,
       stock: "Available",
+      partsStatus: job.parts_status,
+      assignmentConfirmedAt: job.assignment_confirmed_at,
     };
   });
 }
@@ -259,21 +295,16 @@ async function listPendingJobRequests() {
   const allocatedJobIds = new Set(
     (stockMovements ?? []).map((movement: { related_job_id: string }) => movement.related_job_id),
   );
-  const { data: confirmedJobs, error: confirmedJobsError } = await supabase
-    .from("jobs")
-    .select("job_id")
-    .neq("parts_status", "pending");
-  if (confirmedJobsError) throw confirmedJobsError;
-  const confirmedJobIds = new Set(
-    (confirmedJobs ?? []).map((job: { job_id: string }) => job.job_id),
-  );
 
+  // Only assignment-confirmed jobs whose parts are still pending belong in the
+  // allocation queue. Unconfirmed jobs remain in the scheduling stage.
   return schedules
     .filter((job: any) =>
       job.status === "scheduled" &&
       job.technicians.length > 0 &&
-      !allocatedJobIds.has(job.id) &&
-      !confirmedJobIds.has(job.id)
+      job.partsStatus === "pending" &&
+      Boolean(job.assignmentConfirmedAt) &&
+      !allocatedJobIds.has(job.id)
     )
     .map((job: any) => ({
       jobNumber: job.order,
@@ -335,9 +366,18 @@ async function getCurrentTechnicianId(session: Record<string, unknown>) {
   if (error) throw error;
   if (technician?.technician_id) return technician.technician_id;
 
+  // The signed token carries no branch claim, so read the real branch from the
+  // account rather than letting every new technician row default to makati.
+  const { data: account, error: accountError } = await supabase
+    .from("users")
+    .select("branch")
+    .eq("user_id", session.sub)
+    .maybeSingle();
+  if (accountError) throw accountError;
+
   const { data: createdTechnician, error: createError } = await supabase
     .from("technicians")
-    .insert({ user_id: session.sub, branch: (session.branch as string) ?? "makati" })
+    .insert({ user_id: session.sub, branch: (account?.branch as string) ?? "makati" })
     .select("technician_id")
     .single();
 
@@ -362,12 +402,13 @@ async function listFieldReportJobs(session: Record<string, unknown>) {
   const { data: jobs, error } = await query;
   if (error) throw error;
 
+  // A job drops out of the picker once any technician has filed a report for it,
+  // so the picker only ever lists work that still needs a report.
   const reportedJobIds = new Set<string>();
-  const technicianId = await getCurrentTechnicianId(session);
   const { data: submittedReports, error: submittedReportError } = await supabase
     .from("field_reports")
     .select("job_id")
-    .eq("technician_id", technicianId);
+    .not("job_id", "is", null);
 
   if (submittedReportError) throw submittedReportError;
   (submittedReports ?? []).forEach((report: { job_id: string }) => {
@@ -412,7 +453,7 @@ async function listFieldReportJobs(session: Record<string, unknown>) {
         jobNumber: job.job_number,
         clientName: client?.name ?? "Unnamed client",
         serviceType: job.job_type,
-        serviceLabel: job.job_type === "maintenance" ? "Preventive maintenance" : job.job_type === "installation" ? "Installation" : "Service call",
+        serviceLabel: serviceLabelFor(job.job_type),
         siteAddress: client?.address ?? `${String(job.branch).replace(/^./, (letter) => letter.toUpperCase())} branch`,
         technicianName: user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "Unassigned",
         serviceDate: String(job.scheduled_date),
@@ -422,13 +463,42 @@ async function listFieldReportJobs(session: Record<string, unknown>) {
     });
 }
 
-async function listFieldReports(session: Record<string, unknown>) {
-  const { data: reports, error } = await supabase
+// Distinct technicians that have at least one submitted report, for the manager filter.
+async function listReportTechnicians() {
+  const { data, error } = await supabase
+    .from("field_reports")
+    .select("technician_id, technicians!inner(technician_id, users(first_name, last_name))")
+    .in("review_status", ["submitted", "approved", "returned"]);
+  if (error) throw error;
+
+  const byId = new Map<string, string>();
+  (data ?? []).forEach((row: any) => {
+    if (!row.technician_id || byId.has(row.technician_id)) return;
+    const technician = Array.isArray(row.technicians) ? row.technicians[0] : row.technicians;
+    const user = technician && (Array.isArray(technician.users) ? technician.users[0] : technician.users);
+    byId.set(row.technician_id, user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "Unknown technician");
+  });
+  return [...byId.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+async function listFieldReports(session: Record<string, unknown>, requestedTechnicianId = "") {
+  const isManager = ["Admin", "Service Manager", "Sales Manager"].includes(String(session.role ?? ""));
+
+  // A technician may only ever see their own reports, whatever they ask for.
+  // A manager sees everything, optionally narrowed to a single technician.
+  const scopedTechnicianId = isManager
+    ? String(requestedTechnicianId).trim()
+    : String(await getCurrentTechnicianId(session));
+
+  let reportsQuery = supabase
     .from("field_reports")
     .select(`
       report_id,
       report_number,
       job_id,
+      technician_id,
       work_performed,
       service_date,
       time_arrival,
@@ -441,18 +511,22 @@ async function listFieldReports(session: Record<string, unknown>) {
       issue_description,
       recommendations,
       report_parts_used(quantity, parts(sku, name)),
+      report_attachments(file_type, file_url),
       jobs!inner(job_id, job_number, job_type, clients(name, address)),
       technicians!inner(technician_id, user_id, users(first_name, last_name))
     `)
-    .in("review_status", ["submitted", "approved", "returned"])
-    .order("submitted_at", { ascending: false });
+    .in("review_status", ["submitted", "approved", "returned"]);
+  if (scopedTechnicianId) {
+    reportsQuery = reportsQuery.eq("technician_id", scopedTechnicianId);
+  }
+  const { data: reports, error } = await reportsQuery.order("submitted_at", { ascending: false });
 
   if (error) throw error;
 
   const reportedJobIds = new Set((reports ?? []).map((report: any) => report.job_id));
   const { data: reservedJobs, error: reservedJobsError } = await supabase
     .from("jobs")
-    .select("job_id, job_number, job_type, branch, scheduled_date, scheduled_time, parts_confirmed_at, clients(name, address), job_parts!inner(job_part_id, quantity, status, reserved_at, parts(sku, name)), job_technicians(is_active, technicians(users(first_name, last_name)))")
+    .select("job_id, job_number, job_type, branch, scheduled_date, scheduled_time, parts_confirmed_at, clients(name, address), job_parts!inner(job_part_id, quantity, status, reserved_at, parts(sku, name)), job_technicians(technician_id, is_active, technicians(users(first_name, last_name)))")
     .eq("parts_status", "confirmed")
     .eq("job_parts.status", "reserved")
     .neq("status", "cancelled")
@@ -461,6 +535,17 @@ async function listFieldReports(session: Record<string, unknown>) {
 
   const pendingReportItems = (reservedJobs ?? [])
     .filter((job: any) => !reportedJobIds.has(job.job_id))
+    .filter((job: any) => {
+      if (!scopedTechnicianId) return true;
+      const assignments = Array.isArray(job.job_technicians)
+        ? job.job_technicians
+        : job.job_technicians
+          ? [job.job_technicians]
+          : [];
+      return assignments.some(
+        (assignment: any) => assignment.technician_id === scopedTechnicianId,
+      );
+    })
     .map((job: any) => {
       const client = Array.isArray(job.clients) ? job.clients[0] : job.clients;
       const assignments = Array.isArray(job.job_technicians)
@@ -499,11 +584,11 @@ async function listFieldReports(session: Record<string, unknown>) {
       return {
         id: `job:${job.job_number || job.job_id}`,
         client: client?.name ?? "Unknown client",
-        service: job.job_type === "maintenance" ? "Preventive maintenance" : job.job_type === "installation" ? "Installation" : "Service call",
+        service: serviceLabelFor(job.job_type),
         technician: technicianNames.join(", ") || "Unassigned",
         time: displayTime,
         status: "Awaiting Report",
-        tone: "gray",
+        tone: "yellow",
         isPendingReport: true,
         workSummary: "Stock has been reserved. The assigned technician has not submitted a field report yet.",
         parts: reservedParts,
@@ -538,15 +623,20 @@ async function listFieldReports(session: Record<string, unknown>) {
     const user = technician && (Array.isArray(technician.users) ? technician.users[0] : technician.users);
     const submittedAt = report.submitted_at ? new Date(report.submitted_at) : new Date();
     const status = report.review_status === "approved" ? "Ready for Billing" : report.review_status === "returned" ? "Needs Review" : "Submitted";
-    const tone = report.review_status === "approved" ? "green" : report.review_status === "returned" ? "orange" : "gray";
+    const tone = report.review_status === "approved" ? "green" : report.review_status === "returned" ? "orange" : "green";
     const reportId = String(report.report_number || report.report_id);
 
     return {
       id: reportId,
+      reportUuid: report.report_id,
+      reviewStatus: report.review_status,
+      technicianId: report.technician_id,
       client: client?.name ?? "Unknown client",
-      service: job?.job_type === "maintenance" ? "Preventive maintenance" : job?.job_type === "installation" ? "Installation" : "Service call",
+      service: serviceLabelFor(job?.job_type),
       technician: user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "Unknown technician",
       time: submittedAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
+      serviceDate: report.service_date ? String(report.service_date) : "",
+      arrivalTime: String(report.time_arrival ?? "").slice(0, 5),
       status,
       tone,
       workSummary: report.work_performed || "No work summary provided.",
@@ -559,7 +649,11 @@ async function listFieldReports(session: Record<string, unknown>) {
             note: "Used",
           };
         }),
-      images: [],
+      images: (report.report_attachments ?? []).map((attachment: any) => ({
+        name: attachment.file_type || "attachment",
+        src: attachment.file_url || "",
+        alt: attachment.file_type || "Field report attachment",
+      })),
       signature: {
         signer: report.client_signoff_name || "Not provided",
         signedAt: report.submitted_at ? new Date(report.submitted_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "Pending sign-off",
@@ -661,7 +755,7 @@ Deno.serve(async (request: Request) => {
       const password = String(body.password ?? "");
       if (!email || !password) return response({ error: "Email and password are required." }, 400);
       await ensureRoles();
-      let { data: user, error } = await supabase.from("users").select("user_id, first_name, last_name, email, password_hash, branch, is_active, roles(role_name)").eq("email", email).maybeSingle();
+      let { data: user, error } = await supabase.from("users").select("user_id, first_name, last_name, email, password_hash, branch, phone, title, is_active, roles(role_name)").eq("email", email).maybeSingle();
       if (error) throw error;
       if (!user && email === "admin@gmail.com" && password === "admin123") {
         const roleId = await ensureRole("Admin");
@@ -674,13 +768,37 @@ Deno.serve(async (request: Request) => {
       return response(await userResponse(user, user.roles?.role_name ?? ""));
     }
 
+    if (action === "request-password-reset") {
+      const email = String(body.email ?? "").trim().toLowerCase();
+      if (!email) return response({ error: "An email address is required." }, 400);
+      const { data: user, error } = await supabase
+        .from("users")
+        .select("user_id, email")
+        .eq("email", email)
+        .maybeSingle();
+      if (error) throw error;
+      // Answer identically whether or not the address exists, so this endpoint
+      // cannot be used to discover which emails have accounts.
+      if (user) {
+        const { error: insertError } = await supabase
+          .from("password_reset_requests")
+          .insert({ user_id: user.user_id, email: user.email });
+        // 23505 means a pending request already exists for this user; that is fine.
+        if (insertError && insertError.code !== "23505") throw insertError;
+      }
+      return response({ message: "If that email address has an account, a reset request is waiting for an administrator." });
+    }
+
     const session = await verifyToken(request);
     if (!session) return response({ error: "You must be signed in to perform this action." }, 401);
     const canManageSchedule = schedulingActions.has(action) && isSchedulingRole(session.role);
     const canLoadFieldReports = fieldReportActions.has(action) && isFieldReportRole(session.role);
     const canManageInventory = inventoryActions.has(action) && ["Admin", "Warehouse Manager"].includes(session.role);
     const canAllocateJobStock = jobAllocationActions.has(action) && (isSchedulingRole(session.role) || ["Admin", "Warehouse Manager"].includes(session.role));
-    if (action !== "change-password" && !canManageSchedule && !canLoadFieldReports && !canManageInventory && !canAllocateJobStock && session.role !== "Admin") return response({ error: "Administrator access is required." }, 403);
+    // Reviewing a field report is a manager decision: explicitly exclude Technicians,
+    // who otherwise pass the field-report role check.
+    const canReviewReports = action === "review-field-report" && ["Admin", "Service Manager", "Sales Manager"].includes(session.role);
+    if (!selfServiceActions.has(action) && !canManageSchedule && !canLoadFieldReports && !canManageInventory && !canAllocateJobStock && !canReviewReports && session.role !== "Admin") return response({ error: "Administrator access is required." }, 403);
 
     if (action === "change-password") {
       const currentPassword = String(body.currentPassword ?? "");
@@ -692,6 +810,46 @@ Deno.serve(async (request: Request) => {
       const { error: updateError } = await supabase.from("users").update({ password_hash: await hashPassword(newPassword), updated_at: new Date().toISOString() }).eq("user_id", session.sub);
       if (updateError) throw updateError;
       return response({ message: "Password updated successfully." });
+    }
+
+    if (action === "update-profile") {
+      const firstName = String(body.firstName ?? "").trim();
+      const lastName = String(body.lastName ?? "").trim();
+      const email = String(body.email ?? "").trim().toLowerCase();
+      const phone = String(body.phone ?? "").trim();
+      const title = String(body.title ?? "").trim();
+      if (!firstName || !lastName || !email) {
+        return response({ error: "First name, last name, and email are required." }, 400);
+      }
+      const { data: updated, error } = await supabase
+        .from("users")
+        .update({
+          first_name: firstName,
+          last_name: lastName,
+          email,
+          phone: phone || null,
+          title: title || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("user_id", session.sub)
+        .select("user_id, first_name, last_name, email, branch, phone, title, roles(role_name)")
+        .single();
+      if (error) {
+        if (error.code === "23505") return response({ error: "That email address is already in use by another account." }, 409);
+        throw error;
+      }
+      const role = Array.isArray(updated.roles) ? updated.roles[0]?.role_name : updated.roles?.role_name;
+      return response({
+        profile: {
+          id: updated.user_id,
+          name: [updated.first_name, updated.last_name].filter(Boolean).join(" "),
+          email: updated.email,
+          branch: updated.branch,
+          phone: updated.phone ?? "",
+          title: updated.title ?? "",
+          role: role ?? session.role,
+        },
+      });
     }
 
     if (action === "create-account") {
@@ -739,6 +897,74 @@ Deno.serve(async (request: Request) => {
       const { error } = await supabase.from("users").update({ is_active: false, updated_at: new Date().toISOString() }).eq("user_id", userId).eq("is_active", true);
       if (error) throw error;
       return response({ message: "User removed from the active directory." });
+    }
+
+    if (action === "list-password-reset-requests") {
+      const { data, error } = await supabase
+        .from("password_reset_requests")
+        .select("request_id, email, status, requested_at, expires_at, users!password_reset_requests_user_id_fkey(first_name, last_name)")
+        .eq("status", "pending")
+        .order("requested_at", { ascending: false });
+      if (error) throw error;
+      const now = Date.now();
+      return response({
+        requests: (data ?? []).map((request: any) => {
+          const account = Array.isArray(request.users) ? request.users[0] : request.users;
+          return {
+            id: request.request_id,
+            email: request.email,
+            name: account ? [account.first_name, account.last_name].filter(Boolean).join(" ") : "Unknown user",
+            requestedAt: request.requested_at,
+            expiresAt: request.expires_at,
+            expired: new Date(request.expires_at).getTime() <= now,
+          };
+        }),
+      });
+    }
+
+    if (action === "resolve-password-reset") {
+      const requestId = String(body.requestId ?? "").trim();
+      const decision = String(body.decision ?? "").trim();
+      if (!requestId || !["approve", "cancel"].includes(decision)) {
+        return response({ error: "A reset request and a valid decision are required." }, 400);
+      }
+      const { data: resetRequest, error } = await supabase
+        .from("password_reset_requests")
+        .select("request_id, user_id, status, expires_at")
+        .eq("request_id", requestId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!resetRequest) return response({ error: "Reset request not found." }, 404);
+      if (resetRequest.status !== "pending") return response({ error: "This request has already been handled." }, 409);
+
+      const handledAt = new Date().toISOString();
+      if (decision === "cancel") {
+        const { error: cancelError } = await supabase
+          .from("password_reset_requests")
+          .update({ status: "cancelled", handled_by: session.sub, handled_at: handledAt })
+          .eq("request_id", requestId);
+        if (cancelError) throw cancelError;
+        return response({ message: "Reset request cancelled." });
+      }
+
+      if (new Date(resetRequest.expires_at).getTime() <= Date.now()) {
+        return response({ error: "This reset request has expired. Ask the user to submit a new one." }, 409);
+      }
+
+      // A one-time temporary password is returned here, once, for the administrator
+      // to hand to the user out of band. The user is expected to change it afterwards.
+      const temporaryPassword = generateTemporaryPassword();
+      const { error: passwordError } = await supabase
+        .from("users")
+        .update({ password_hash: await hashPassword(temporaryPassword), updated_at: handledAt })
+        .eq("user_id", resetRequest.user_id);
+      if (passwordError) throw passwordError;
+      const { error: approveError } = await supabase
+        .from("password_reset_requests")
+        .update({ status: "approved", handled_by: session.sub, handled_at: handledAt })
+        .eq("request_id", requestId);
+      if (approveError) throw approveError;
+      return response({ message: "Temporary password issued.", temporaryPassword });
     }
 
     if (action === "list-inventory") {
@@ -985,13 +1211,20 @@ Deno.serve(async (request: Request) => {
 
       const { data: stock, error: stockLookupError } = await supabase
         .from("stock")
-        .select("part_id, branch, quantity_on_hand")
+        .select("part_id, branch, quantity_on_hand, quantity_reserved")
         .eq("stock_id", stockId)
         .maybeSingle();
       if (stockLookupError) throw stockLookupError;
       if (!stock) return response({ error: "This inventory item no longer exists." }, 404);
-      if (direction === "out" && quantity > stock.quantity_on_hand) {
-        return response({ error: "The quantity removed cannot exceed current stock." }, 400);
+      if (direction === "out") {
+        if (quantity > stock.quantity_on_hand) {
+          return response({ error: "The quantity removed cannot exceed current stock." }, 400);
+        }
+        const reserved = Number(stock.quantity_reserved) || 0;
+        const available = stock.quantity_on_hand - reserved;
+        if (quantity > available) {
+          return response({ error: `Only ${available} of ${stock.quantity_on_hand} units are available; ${reserved} are reserved for jobs.` }, 400);
+        }
       }
 
       const { error: movementError } = await supabase.from("stock_movements").insert({
@@ -1004,6 +1237,34 @@ Deno.serve(async (request: Request) => {
       });
       if (movementError) throw movementError;
       return response({ message: "Stock quantity updated." });
+    }
+
+    if (action === "review-field-report") {
+      const reportId = String(body.reportId ?? "").trim();
+      const decision = String(body.decision ?? "").trim();
+      if (!reportId || !["approve", "return"].includes(decision)) {
+        return response({ error: "A field report and a valid decision are required." }, 400);
+      }
+      const { data: report, error } = await supabase
+        .from("field_reports")
+        .select("report_id, review_status")
+        .eq("report_id", reportId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!report) return response({ error: "Field report not found." }, 404);
+      if (report.review_status === "draft") {
+        return response({ error: "This report has not been submitted for review yet." }, 409);
+      }
+      const nextStatus = decision === "approve" ? "approved" : "returned";
+      const { error: reviewError } = await supabase
+        .from("field_reports")
+        .update({ review_status: nextStatus, reviewed_by: session.sub, reviewed_at: new Date().toISOString() })
+        .eq("report_id", reportId);
+      if (reviewError) throw reviewError;
+      return response({
+        message: nextStatus === "approved" ? "Report approved for billing." : "Report returned for correction.",
+        reviewStatus: nextStatus,
+      });
     }
 
     if (action === "list-technicians") {
@@ -1019,7 +1280,9 @@ Deno.serve(async (request: Request) => {
     }
 
     if (action === "list-field-reports") {
-      return response({ reports: await listFieldReports(session) });
+      const isManager = ["Admin", "Service Manager", "Sales Manager"].includes(String(session.role ?? ""));
+      const reports = await listFieldReports(session, String(body.technicianId ?? ""));
+      return response({ reports, technicians: isManager ? await listReportTechnicians() : [] });
     }
 
     if (action === "submit-field-report") {
@@ -1082,6 +1345,28 @@ Deno.serve(async (request: Request) => {
         }
       }
       return response({ message: "Schedule updated." });
+    }
+
+    if (action === "confirm-job-assignment") {
+      const jobNumber = String(body.jobNumber ?? "").trim();
+      if (!jobNumber) return response({ error: "A work order number is required." }, 400);
+      const { data: job, error } = await supabase
+        .from("jobs")
+        .select("job_id, status, parts_status, assignment_confirmed_at")
+        .eq("job_number", jobNumber)
+        .maybeSingle();
+      if (error) throw error;
+      if (!job) return response({ error: "Scheduled job not found." }, 404);
+      if (job.status === "cancelled") return response({ error: "Cancelled jobs cannot be confirmed." }, 409);
+      if (job.parts_status !== "pending") return response({ error: "This job's stock has already been allocated." }, 409);
+      if (job.assignment_confirmed_at) return response({ message: "Assignment already confirmed.", confirmedAt: job.assignment_confirmed_at });
+      const confirmedAt = new Date().toISOString();
+      const { error: updateError } = await supabase
+        .from("jobs")
+        .update({ assignment_confirmed_at: confirmedAt })
+        .eq("job_id", job.job_id);
+      if (updateError) throw updateError;
+      return response({ message: "Assignment confirmed.", confirmedAt });
     }
 
     if (action === "create-schedule") {

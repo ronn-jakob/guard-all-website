@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { Fragment, useState, useRef, useEffect } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
@@ -121,6 +121,7 @@ function Inventory() {
   const [selectedCategory, setSelectedCategory] = useState("All categories");
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const categoryDropdownRef = useRef(null);
+  const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     let isCurrent = true;
@@ -224,12 +225,14 @@ function Inventory() {
     const matchesCategory =
       selectedCategory === "All categories" ||
       itemCategory.toLowerCase() === selectedCategory.toLowerCase();
-    return matchesBranch && matchesCategory;
+    const query = searchTerm.trim().toLowerCase();
+    const matchesSearch =
+      !query || `${item[1]} ${item[2]}`.toLowerCase().includes(query);
+    return matchesBranch && matchesCategory && matchesSearch;
   });
   const availableQuantities = new Map(
     recordsToDisplay.map((item) => [item[12], item[16] ?? Number(item[3])]),
   );
-  const hasInventoryItems = filteredInventoryItems.length > 0;
   const newItemTotalCost =
     (Number(newItemQuantity) || 0) * (Number(newItemUnitPrice) || 0);
   const selectedInventoryItem = inventoryRecords.find(
@@ -252,7 +255,16 @@ function Inventory() {
       "Requires procurement",
       true,
     ],
-    ["local_shipping", "In transit", "—", "No incoming stock tracked"],
+    [
+      "pending_actions",
+      "Pending allocation",
+      isLoadingPendingRequests
+        ? "—"
+        : String(pendingJobRequests.length).padStart(2, "0"),
+      pendingRequestsError
+        ? "Could not load requests"
+        : "Awaiting stock reservation",
+    ],
   ];
 
   const handleSelectItem = (stockId) => {
@@ -339,11 +351,6 @@ function Inventory() {
     setActionError("");
   }
 
-  function handleBackToPendingRequests() {
-    resetJobAllocation();
-    setActiveTab("Pending Job Requests");
-  }
-
   function handleCancelJobAllocation() {
     resetJobAllocation();
     setActiveTab("Stock Ledger");
@@ -415,7 +422,7 @@ function Inventory() {
   return (
     <main className="flex h-screen overflow-hidden bg-[#1f2022] font-sans text-[#063b7c] max-[1024px]:block">
       <Sidebar />
-      <section className="h-screen min-w-0 flex-1 overflow-y-auto bg-[#edf7ff]">
+      <section className="h-screen w-full min-w-0 flex-1 overflow-y-auto bg-[#edf7ff] max-[1024px]:h-[100dvh]">
         <TopBar />
         <div className="px-8 pb-6 pt-8 max-[1024px]:px-6 max-[1024px]:pb-20 max-[1024px]:pt-5 max-[620px]:px-3">
           {/* Header Bar */}
@@ -538,6 +545,8 @@ function Inventory() {
                       </span>
                       <input
                         className="w-full min-w-0 border-0 bg-transparent outline-none placeholder:text-[#174f9a]"
+                        value={searchTerm}
+                        onChange={(event) => setSearchTerm(event.target.value)}
                         placeholder="Search part or code"
                       />
                     </label>
@@ -695,113 +704,196 @@ function Inventory() {
                         branch.toLowerCase() ===
                         String(jobAllocation?.branch || "").toLowerCase();
                       return (
-                        <div
-                          className={`grid min-h-[64px] grid-cols-[2fr_.8fr_.9fr_1.25fr_1fr_1fr_1fr_1fr_140px] items-center border-t border-[#e4e8eb] px-7 text-[11px] max-[1100px]:grid-cols-[2fr_1fr_1fr_1fr_1fr_140px] max-[1100px]:[&>*:nth-child(4)]:hidden max-[1100px]:[&>*:nth-child(5)]:hidden max-[1100px]:[&>*:nth-child(6)]:hidden max-[850px]:grid-cols-[2fr_1fr_1fr_1fr_140px] max-[850px]:[&>*:nth-child(7)]:hidden max-[850px]:px-4 max-[620px]:min-h-[62px] max-[620px]:grid-cols-[1fr_auto] max-[620px]:gap-x-2 max-[620px]:gap-y-1 max-[620px]:px-3 max-[620px]:py-2 ${
-                            alert ? "bg-[#fff3f1]" : "bg-white"
-                          }`}
-                          key={stockId}
-                        >
-                          <div className="flex min-w-0 items-center gap-4 max-[620px]:col-start-1 max-[620px]:row-span-2 max-[620px]:gap-2">
+                        <Fragment key={stockId}>
+                          {/* Desktop / tablet table row (unchanged layout) */}
+                          <div
+                            className={`grid min-h-[64px] grid-cols-[2fr_.8fr_.9fr_1.25fr_1fr_1fr_1fr_1fr_140px] items-center border-t border-[#e4e8eb] px-7 text-[11px] max-[1100px]:grid-cols-[2fr_1fr_1fr_1fr_1fr_140px] max-[1100px]:[&>*:nth-child(4)]:hidden max-[1100px]:[&>*:nth-child(5)]:hidden max-[1100px]:[&>*:nth-child(6)]:hidden max-[850px]:grid-cols-[2fr_1fr_1fr_1fr_140px] max-[850px]:[&>*:nth-child(7)]:hidden max-[850px]:px-4 max-[620px]:hidden ${
+                              alert ? "bg-[#fff3f1]" : "bg-white"
+                            } ${!isAllocatingForJob ? "cursor-pointer hover:bg-[#f8fbff]" : ""}`}
+                            onClick={() => {
+                              if (!isAllocatingForJob) {
+                                setSelectedItemCode(stockId);
+                                setStockAdjustment("");
+                                setActionError("");
+                              }
+                            }}
+                          >
+                            <div className="flex min-w-0 items-center gap-4">
+                              <span
+                                className={`grid h-9 w-9 flex-none place-items-center rounded-[6px] ${
+                                  alert
+                                    ? "bg-[#ffd5cc] text-[#ff5a42]"
+                                    : "bg-[#d6e6fb] text-[#1954a0]"
+                                }`}
+                              >
+                                <span className="material-symbols-outlined text-[19px]">
+                                  {icon}
+                                </span>
+                              </span>
+                              <span className="min-w-0">
+                                <strong className="block truncate">{name}</strong>
+                                <small className="mt-1 block text-[10px] text-[#8d969e]">
+                                  {code}
+                                </small>
+                              </span>
+                            </div>
+                            <strong>
+                              {isAllocatingForJob ? availableQuantity : quantity}
+                              <small className="font-normal text-[#8d969e]">
+                                {" "}
+                                / min {minimum}
+                              </small>
+                            </strong>
+                            <strong>{branch}</strong>
+                            <span className="text-[#7f8992] max-[1100px]:hidden">
+                              {address}
+                            </span>
+                            <span className="text-[#174f9a] max-[1100px]:hidden">
+                              {unitPrice}
+                            </span>
+                            <strong className="text-[#174f9a] max-[1100px]:hidden">
+                              {totalCost}
+                            </strong>
+                            <span className="text-[#7f8992]">
+                              {category}
+                            </span>
                             <span
-                              className={`grid h-9 w-9 flex-none place-items-center rounded-[6px] max-[620px]:hidden ${
+                              className={`w-max rounded-full border px-3 py-1 text-[10px] ${
                                 alert
-                                  ? "bg-[#ffd5cc] text-[#ff5a42]"
-                                  : "bg-[#d6e6fb] text-[#1954a0]"
+                                  ? "border-[#ffb0a3] text-[#f05b48]"
+                                  : "border-[#d7dadd] text-[#70777d]"
                               }`}
                             >
-                              <span className="material-symbols-outlined text-[19px]">
-                                {icon}
+                              <span className="material-symbols-outlined mr-1 align-middle text-[13px]">
+                                {alert ? "warning" : "check_circle"}
                               </span>
+                              {statusName}
                             </span>
-                            <span className="min-w-0">
-                              <strong className="block truncate">{name}</strong>
-                              <small className="mt-1 block text-[10px] text-[#8d969e]">
-                                {code}
-                              </small>
-                            </span>
+                            <div className="flex items-center justify-end gap-2">
+                              {isAllocatingForJob ? (
+                                <>
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    disabled={availableQuantity <= 0 || !isJobBranch}
+                                    aria-label={`Select ${name} for ${selectedJobId}`}
+                                    title={
+                                      isJobBranch
+                                        ? undefined
+                                        : "Stock can only be allocated from the job's branch"
+                                    }
+                                    onChange={() => handleSelectItem(stockId)}
+                                    className="h-4 w-4 rounded border-gray-300 text-[#1250a0] focus:ring-[#1250a0]"
+                                  />
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max={availableQuantity}
+                                    value={issueQuantities[stockId] || "1"}
+                                    disabled={
+                                      !isChecked ||
+                                      availableQuantity <= 0 ||
+                                      !isJobBranch
+                                    }
+                                    aria-label={`Quantity of ${name} to issue`}
+                                    onChange={(event) =>
+                                      handleQuantityChange(stockId, event.target.value)
+                                    }
+                                    className="h-8 w-[68px] rounded border border-[#d9dfe4] bg-white px-2 text-center text-[11px] text-[#1250a0] outline-none focus:border-[#1250a0] disabled:bg-[#f2f4f6]"
+                                  />
+                                </>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedItemCode(stockId);
+                                    setStockAdjustment("");
+                                    setActionError("");
+                                  }}
+                                  className="text-right text-[10px] font-bold text-[#7573bd] hover:text-[#1250a0]"
+                                >
+                                  View
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          <strong className="max-[620px]:col-start-2 max-[620px]:row-start-1 max-[620px]:text-[9px]">
-                            {isAllocatingForJob ? availableQuantity : quantity}
-                            <small className="font-normal text-[#8d969e]">
-                              {" "}
-                              / min {minimum}
-                            </small>
-                          </strong>
-                          <strong className="max-[620px]:hidden">
-                            {branch}
-                          </strong>
-                          <span className="text-[#7f8992] max-[1100px]:hidden">
-                            {address}
-                          </span>
-                          <span className="text-[#174f9a] max-[1100px]:hidden">
-                            {unitPrice}
-                          </span>
-                          <strong className="text-[#174f9a] max-[1100px]:hidden">
-                            {totalCost}
-                          </strong>
-                          <span className="text-[#7f8992] max-[620px]:hidden">
-                            {category}
-                          </span>
-                          <span
-                            className={`w-max rounded-full border px-3 py-1 text-[10px] max-[620px]:col-start-2 max-[620px]:row-start-2 max-[620px]:justify-self-end max-[620px]:px-2 max-[620px]:py-0.5 max-[620px]:text-[7px] ${
+
+                          {/* Mobile card layout */}
+                          <div
+                            className={`hidden max-[620px]:mx-2 max-[620px]:mb-2 max-[620px]:flex max-[620px]:items-start max-[620px]:justify-between max-[620px]:gap-3 max-[620px]:rounded-[8px] max-[620px]:border max-[620px]:px-3 max-[620px]:py-3 max-[620px]:shadow-[0_2px_5px_rgb(31_59_82_/_8%)] ${
                               alert
-                                ? "border-[#ffb0a3] text-[#f05b48]"
-                                : "border-[#d7dadd] text-[#70777d]"
-                            }`}
+                                ? "max-[620px]:border-[#ffb0a3] max-[620px]:bg-[#fff3f1]"
+                                : "max-[620px]:border-[#dfe6ec] max-[620px]:bg-white"
+                            } ${!isAllocatingForJob ? "max-[620px]:cursor-pointer" : ""}`}
+                            onClick={() => {
+                              if (!isAllocatingForJob) {
+                                setSelectedItemCode(stockId);
+                                setStockAdjustment("");
+                                setActionError("");
+                              }
+                            }}
+                            role={isAllocatingForJob ? undefined : "button"}
+                            aria-label={
+                              isAllocatingForJob ? undefined : `View ${name} details`
+                            }
                           >
-                            <span className="material-symbols-outlined mr-1 align-middle text-[13px] max-[620px]:hidden">
-                              {alert ? "warning" : "check_circle"}
-                            </span>
-                            {statusName}
-                          </span>
-                          <div className="flex items-center justify-end gap-2">
-                            {isAllocatingForJob ? (
-                              <>
-                                <input
-                                  type="checkbox"
-                                  checked={isChecked}
-                                  disabled={availableQuantity <= 0 || !isJobBranch}
-                                  aria-label={`Select ${name} for ${selectedJobId}`}
-                                  title={
-                                    isJobBranch
-                                      ? undefined
-                                      : "Stock can only be allocated from the job's branch"
-                                  }
-                                  onChange={() => handleSelectItem(stockId)}
-                                  className="h-4 w-4 rounded border-gray-300 text-[#1250a0] focus:ring-[#1250a0]"
-                                />
-                                <input
-                                  type="number"
-                                  min="1"
-                                  max={availableQuantity}
-                                  value={issueQuantities[stockId] || "1"}
-                                  disabled={
-                                    !isChecked ||
-                                    availableQuantity <= 0 ||
-                                    !isJobBranch
-                                  }
-                                  aria-label={`Quantity of ${name} to issue`}
-                                  onChange={(event) =>
-                                    handleQuantityChange(stockId, event.target.value)
-                                  }
-                                  className="h-8 w-[68px] rounded border border-[#d9dfe4] bg-white px-2 text-center text-[11px] text-[#1250a0] outline-none focus:border-[#1250a0] disabled:bg-[#f2f4f6]"
-                                />
-                              </>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedItemCode(stockId);
-                                  setStockAdjustment("");
-                                  setActionError("");
-                                }}
-                                className="text-right text-[10px] font-bold text-[#7573bd] hover:text-[#1250a0] max-[620px]:col-start-2 max-[620px]:row-start-3"
+                            <div className="min-w-0">
+                              <strong className="block truncate text-[14px] text-[#174f9a]">
+                                {name}
+                              </strong>
+                              <small className="mt-1 block truncate text-[11px] text-[#8d969e]">
+                                {code} • {branch}
+                              </small>
+                            </div>
+                            <div className="flex flex-none flex-col items-end gap-1.5">
+                              <span
+                                className={`w-max rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                                  alert
+                                    ? "bg-[#ffd9d2] text-[#e05b45]"
+                                    : "bg-[#e1f6e4] text-[#388b47]"
+                                }`}
                               >
-                                View
-                              </button>
-                            )}
+                                {statusName}
+                              </span>
+                              {isAllocatingForJob ? (
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    disabled={availableQuantity <= 0 || !isJobBranch}
+                                    aria-label={`Select ${name} for ${selectedJobId}`}
+                                    onChange={() => handleSelectItem(stockId)}
+                                    className="h-4 w-4 rounded border-gray-300 text-[#1250a0] focus:ring-[#1250a0]"
+                                  />
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max={availableQuantity}
+                                    value={issueQuantities[stockId] || "1"}
+                                    disabled={
+                                      !isChecked ||
+                                      availableQuantity <= 0 ||
+                                      !isJobBranch
+                                    }
+                                    aria-label={`Quantity of ${name} to issue`}
+                                    onChange={(event) =>
+                                      handleQuantityChange(stockId, event.target.value)
+                                    }
+                                    className="h-8 w-[68px] rounded border border-[#d9dfe4] bg-white px-2 text-center text-[11px] text-[#1250a0] outline-none focus:border-[#1250a0] disabled:bg-[#f2f4f6]"
+                                  />
+                                </div>
+                              ) : (
+                                <strong className="text-[13px] text-[#174f9a]">
+                                  {quantity}
+                                  <small className="font-normal text-[#8d969e]">
+                                    {" "}
+                                    /min {minimum}
+                                  </small>
+                                </strong>
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        </Fragment>
                       );
                     },
                   )
@@ -870,7 +962,7 @@ function Inventory() {
                 )}
 
                 <div className="overflow-hidden rounded-[8px] border border-[#dfe6ec]">
-                  <div className="grid grid-cols-[1.2fr_2fr_1.5fr_1fr_1.2fr_120px] bg-[#fafafa] px-6 py-3 text-[10px] font-bold uppercase text-[#77818a]">
+                  <div className="grid grid-cols-[1.2fr_2fr_1.5fr_1fr_1.2fr_120px] bg-[#fafafa] px-6 py-3 text-[10px] font-bold uppercase text-[#77818a] max-[850px]:grid-cols-[1.2fr_2fr_1.5fr_120px] max-[850px]:[&>span:nth-child(4)]:hidden max-[850px]:[&>span:nth-child(5)]:hidden max-[620px]:grid-cols-[1fr_1fr_100px] max-[620px]:[&>span:nth-child(2)]:hidden">
                     <span>Job</span>
                     <span>Client Location</span>
                     <span>Scheduled</span>
@@ -891,7 +983,7 @@ function Inventory() {
                     pendingJobRequests.map((req) => (
                       <div
                         key={req.jobNumber}
-                        className="grid grid-cols-[1.2fr_2fr_1.5fr_1fr_1.2fr_120px] items-center border-t border-[#e4e8eb] px-6 py-4 text-[11px]"
+                        className="grid grid-cols-[1.2fr_2fr_1.5fr_1fr_1.2fr_120px] items-center border-t border-[#e4e8eb] px-6 py-4 text-[11px] max-[850px]:grid-cols-[1.2fr_2fr_1.5fr_120px] max-[850px]:[&>*:nth-child(4)]:hidden max-[850px]:[&>*:nth-child(5)]:hidden max-[620px]:grid-cols-[1fr_1fr_100px] max-[620px]:[&>*:nth-child(2)]:hidden"
                       >
                         <div>
                           <strong className="block text-[#063b7c]">
@@ -953,7 +1045,7 @@ function Inventory() {
                 </div>
 
                 <div className="overflow-hidden rounded-[8px] border border-[#dfe6ec]">
-                  <div className="grid grid-cols-[1.5fr_1.5fr_2fr_1fr_1.5fr] bg-[#fafafa] px-6 py-3 text-[10px] font-bold uppercase text-[#77818a]">
+                  <div className="grid grid-cols-[1.5fr_1.5fr_2fr_1fr_1.5fr] bg-[#fafafa] px-6 py-3 text-[10px] font-bold uppercase text-[#77818a] max-[850px]:grid-cols-[1.5fr_1.5fr_2fr_1.5fr] max-[850px]:[&>span:nth-child(4)]:hidden max-[620px]:grid-cols-[1.5fr_1.5fr_1.5fr] max-[620px]:[&>span:nth-child(5)]:hidden">
                     <span>Date</span>
                     <span>Job</span>
                     <span>Item</span>
@@ -977,7 +1069,7 @@ function Inventory() {
                     jobAllocationsHistory.map((item) => (
                       <div
                         key={item.id}
-                        className="grid grid-cols-[1.5fr_1.5fr_2fr_1fr_1.5fr] items-center border-t border-[#e4e8eb] px-6 py-4 text-[11px]"
+                        className="grid grid-cols-[1.5fr_1.5fr_2fr_1fr_1.5fr] items-center border-t border-[#e4e8eb] px-6 py-4 text-[11px] max-[850px]:grid-cols-[1.5fr_1.5fr_2fr_1.5fr] max-[850px]:[&>*:nth-child(4)]:hidden max-[620px]:grid-cols-[1.5fr_1.5fr_1.5fr] max-[620px]:[&>*:nth-child(5)]:hidden"
                       >
                         <span className="text-[#8e959b]">
                           {item.date

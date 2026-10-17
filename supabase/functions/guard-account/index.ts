@@ -33,7 +33,29 @@ const encode = (value: Uint8Array | string) => { const bytes = typeof value === 
 const decode = (value: string) => { const normalized = value.replace(/-/g, "+").replace(/_/g, "/"); const binary = atob(normalized + "=".repeat((4 - normalized.length % 4) % 4)); return Uint8Array.from(binary, (character) => character.charCodeAt(0)); };
 async function passwordHash(password: string) { const salt = crypto.getRandomValues(new Uint8Array(16)); const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]); const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt, iterations, hash: "SHA-256" }, key, 256); return `pbkdf2_sha256$${iterations}$${encode(salt)}$${encode(new Uint8Array(bits))}`; }
 async function verifyPassword(password: string, stored: string) { const [algorithm, iterationText, saltText, hashText] = stored.split("$"); if (algorithm !== "pbkdf2_sha256") return false; const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]); const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: decode(saltText), iterations: Number(iterationText), hash: "SHA-256" }, key, decode(hashText).length * 8); return encode(new Uint8Array(bits)) === encode(decode(hashText)); }
-async function verifyToken(request: Request) { const token = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, ""); if (!token) return null; const [header, body, signature] = token.split("."); const key = await crypto.subtle.importKey("raw", encoder.encode(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]); if (!await crypto.subtle.verify("HMAC", key, decode(signature), encoder.encode(`${header}.${body}`))) return null; const payload = JSON.parse(decoder.decode(decode(body))); return payload.exp > Date.now() / 1000 ? payload : null; }
+async function verifyToken(request: Request) {
+  const token = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "");
+  if (!token) return null;
+  const [header, body, signature] = token.split(".");
+  if (!header || !body || !signature) return null;
+  const key = await crypto.subtle.importKey("raw", encoder.encode(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+  if (!await crypto.subtle.verify("HMAC", key, decode(signature), encoder.encode(`${header}.${body}`))) return null;
+  const payload = JSON.parse(decoder.decode(decode(body)));
+  if (!(payload.exp > Math.floor(Date.now() / 1000))) return null;
+
+  // A valid signature alone is not enough: the account must still be active, and
+  // the role is read from the database so deactivation or a role change applies
+  // immediately instead of only after the token expires.
+  const { data: account, error } = await supabase
+    .from("users")
+    .select("is_active, roles(role_name)")
+    .eq("user_id", payload.sub)
+    .maybeSingle();
+  if (error) throw error;
+  if (!account?.is_active) return null;
+  const role = Array.isArray(account.roles) ? account.roles[0]?.role_name : account.roles?.role_name;
+  return { ...payload, role: role ?? payload.role };
+}
 async function roleId(roleName: string) { const existing = await supabase.from("roles").select("role_id").eq("role_name", roleName).maybeSingle(); if (existing.error) throw existing.error; if (existing.data) return existing.data.role_id; const created = await supabase.from("roles").insert({ role_name: roleName }).select("role_id").single(); if (created.error) throw created.error; return created.data.role_id; }
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers });

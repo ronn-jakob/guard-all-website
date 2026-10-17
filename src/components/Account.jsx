@@ -16,6 +16,16 @@ const normalizeAccountRole = (account) =>
     ? { ...account, role: "Service Manager" }
     : account;
 
+function formatResetDate(value) {
+  if (!value) return "—";
+  return new Date(value).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
 function Account() {
   const [accounts, setAccounts] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -23,10 +33,11 @@ function Account() {
   const [successMessage, setSuccessMessage] = useState("");
   const [deletingAccountId, setDeletingAccountId] = useState(null);
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
-  const [resetRequest, setResetRequest] = useState(() => {
-    const storedRequest = localStorage.getItem("passwordResetRequest");
-    return storedRequest ? JSON.parse(storedRequest) : null;
-  });
+  const [pendingResetRequests, setPendingResetRequests] = useState([]);
+  const [isLoadingResets, setIsLoadingResets] = useState(true);
+  const [resolvingResetId, setResolvingResetId] = useState("");
+  const [resetError, setResetError] = useState("");
+  const [issuedPassword, setIssuedPassword] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -43,6 +54,26 @@ function Account() {
     };
   }, []);
 
+  useEffect(() => {
+    let isMounted = true;
+    callAuthFunction("list-password-reset-requests")
+      .then(({ requests: incomingRequests }) => {
+        if (isMounted)
+          setPendingResetRequests(
+            Array.isArray(incomingRequests) ? incomingRequests : [],
+          );
+      })
+      .catch((error) => {
+        if (isMounted) setResetError(error.message);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingResets(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const filteredAccounts = accounts.filter((account) =>
     `${account.name} ${account.email} ${account.role}`
       .toLowerCase()
@@ -52,19 +83,38 @@ function Account() {
     (account) => account.status === "Active",
   ).length;
 
-  const handleApproveReset = () => {
-    const approvedRequest = { ...resetRequest, status: "approved" };
-    localStorage.setItem(
-      "passwordResetRequest",
-      JSON.stringify(approvedRequest),
-    );
-    setResetRequest(approvedRequest);
-  };
+  async function loadResetRequests() {
+    try {
+      const { requests: incomingRequests } = await callAuthFunction(
+        "list-password-reset-requests",
+      );
+      setPendingResetRequests(
+        Array.isArray(incomingRequests) ? incomingRequests : [],
+      );
+    } catch (error) {
+      setResetError(error.message);
+    } finally {
+      setIsLoadingResets(false);
+    }
+  }
 
-  const handleClearReset = () => {
-    localStorage.removeItem("passwordResetRequest");
-    setResetRequest(null);
-  };
+  async function handleResolveReset(requestId, decision) {
+    setResetError("");
+    setIssuedPassword("");
+    setResolvingResetId(requestId);
+    try {
+      const result = await callAuthFunction("resolve-password-reset", {
+        requestId,
+        decision,
+      });
+      if (result.temporaryPassword) setIssuedPassword(result.temporaryPassword);
+      await loadResetRequests();
+    } catch (error) {
+      setResetError(error.message);
+    } finally {
+      setResolvingResetId("");
+    }
+  }
 
   const handleCreateAccount = async (event) => {
     event.preventDefault();
@@ -126,7 +176,7 @@ function Account() {
   return (
     <main className="flex h-screen overflow-hidden bg-[#202123] font-sans text-[#174f9a] max-[1024px]:block">
       <Sidebar />
-      <section className="h-screen min-w-0 flex-1 overflow-y-auto bg-[#edf7ff]">
+      <section className="h-screen w-full min-w-0 flex-1 overflow-y-auto bg-[#edf7ff] max-[1024px]:h-[100dvh]">
         <TopBar />
         <div className="px-8 pb-8 pt-8 max-[1024px]:px-6 max-[1024px]:pb-20 max-[1024px]:pt-5 max-[620px]:px-3">
           <header className="mb-7 max-[620px]:mb-4">
@@ -141,48 +191,115 @@ function Account() {
             </p>
           </header>
 
-          <section className="mb-[18px] flex max-w-[1180px] items-center justify-between gap-4 rounded-[10px] border border-[#dfe6ec] bg-white px-5 py-4 shadow-[0_3px_8px_rgb(31_59_82_/_8%)] max-[620px]:items-start max-[620px]:flex-col max-[620px]:px-4">
-            <div className="flex min-w-0 items-center gap-3">
-              <span className="grid h-10 w-10 flex-none place-items-center rounded-[6px] bg-[#fff0ec] text-[#d85b45]">
-                <span className="material-symbols-outlined text-[21px]">
-                  lock_reset
+          <section className="mb-[18px] max-w-[1180px] rounded-[10px] border border-[#dfe6ec] bg-white px-5 py-4 shadow-[0_3px_8px_rgb(31_59_82_/_8%)] max-[620px]:px-4">
+            <div className="flex items-center justify-between gap-4 max-[620px]:items-start max-[620px]:flex-col">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="grid h-10 w-10 flex-none place-items-center rounded-[6px] bg-[#fff0ec] text-[#d85b45]">
+                  <span className="material-symbols-outlined text-[21px]">
+                    lock_reset
+                  </span>
                 </span>
-              </span>
-              <div className="min-w-0">
-                <p className="m-0 text-[10px] font-bold uppercase tracking-[.1em] text-[#818b94]">
-                  Security
-                </p>
-                <h2 className="m-0 mt-1 text-[16px] font-bold text-[#263747] max-[620px]:text-[14px]">
-                  Password reset requests
-                </h2>
-                <p className="m-0 mt-1 truncate text-[12px] text-[#89939b]">
-                  {resetRequest
-                    ? `${resetRequest.email} · ${resetRequest.status}`
-                    : "No pending password reset requests."}
-                </p>
+                <div className="min-w-0">
+                  <p className="m-0 text-[10px] font-bold uppercase tracking-[.1em] text-[#818b94]">
+                    Security
+                  </p>
+                  <h2 className="m-0 mt-1 text-[16px] font-bold text-[#263747] max-[620px]:text-[14px]">
+                    Password reset requests
+                  </h2>
+                  <p className="m-0 mt-1 text-[12px] text-[#89939b]">
+                    {isLoadingResets
+                      ? "Checking for requests..."
+                      : pendingResetRequests.length === 0
+                        ? "No pending password reset requests."
+                        : `${pendingResetRequests.length} awaiting an administrator`}
+                  </p>
+                </div>
               </div>
-            </div>
-            {resetRequest?.status === "pending" && (
               <button
-                className="inline-flex h-9 flex-none items-center gap-2 rounded-[6px] border-0 bg-[#1250a0] px-4 text-[12px] font-bold text-white transition hover:bg-[#0e4389] max-[620px]:w-full max-[620px]:justify-center"
-                onClick={handleApproveReset}
+                className="inline-flex h-9 flex-none items-center gap-2 rounded-[6px] border border-[#d6dee6] bg-white px-4 text-[12px] font-bold text-[#68798a] transition hover:border-[#1250a0] hover:text-[#1250a0] max-[620px]:w-full max-[620px]:justify-center"
+                onClick={loadResetRequests}
                 type="button"
               >
                 <span className="material-symbols-outlined text-[17px]">
-                  check
+                  refresh
                 </span>
-                Approve request
+                Refresh
               </button>
-            )}
-            {resetRequest?.status === "approved" && (
-              <button
-                className="flex-none text-[11px] font-semibold text-[#7d8994] hover:text-[#d85b45]"
-                onClick={handleClearReset}
-                type="button"
+            </div>
+
+            {issuedPassword && (
+              <div
+                className="mt-4 rounded-[6px] border border-[#a8dfb7] bg-[#effaf2] px-4 py-3 text-[12px] text-[#267340]"
+                role="status"
               >
-                Clear
-              </button>
+                <strong className="block">
+                  Temporary password issued — hand this to the user now.
+                </strong>
+                <span className="mt-1 block text-[11px]">
+                  It is not stored anywhere and will not be shown again.
+                </span>
+                <code className="mt-2 block select-all rounded-[5px] border border-[#a8dfb7] bg-white px-3 py-2 text-[15px] font-bold tracking-[.08em] text-[#1c5c30]">
+                  {issuedPassword}
+                </code>
+              </div>
             )}
+
+            {resetError && (
+              <p
+                className="m-0 mt-4 rounded-[5px] border border-[#f0b8b0] bg-[#fff1ee] px-3 py-2 text-[12px] text-[#b64132]"
+                role="alert"
+              >
+                {resetError}
+              </p>
+            )}
+
+            {pendingResetRequests.map((request) => (
+              <div
+                className="mt-4 flex items-center justify-between gap-3 border-t border-[#e8edf1] pt-4 max-[620px]:flex-col max-[620px]:items-stretch"
+                key={request.id}
+              >
+                <div className="min-w-0">
+                  <strong className="block truncate text-[13px] text-[#263747]">
+                    {request.name}
+                  </strong>
+                  <span className="block truncate text-[11px] text-[#89939b]">
+                    {request.email}
+                  </span>
+                  <span className="mt-0.5 block text-[10px] text-[#9aa3aa]">
+                    Requested {formatResetDate(request.requestedAt)}
+                    {request.expired ? " · expired" : ""}
+                  </span>
+                </div>
+                <div className="flex flex-none gap-2 max-[620px]:w-full">
+                  <button
+                    className="h-9 rounded-[6px] border border-[#d6dee6] bg-white px-4 text-[12px] font-semibold text-[#68798a] transition hover:border-[#e05b45] hover:text-[#e05b45] disabled:cursor-wait disabled:opacity-60 max-[620px]:flex-1"
+                    onClick={() => handleResolveReset(request.id, "cancel")}
+                    disabled={resolvingResetId === request.id}
+                    type="button"
+                  >
+                    Cancel request
+                  </button>
+                  <button
+                    className="inline-flex h-9 items-center gap-2 rounded-[6px] border-0 bg-[#1250a0] px-4 text-[12px] font-bold text-white transition hover:bg-[#0e4389] disabled:cursor-wait disabled:opacity-60 max-[620px]:flex-1"
+                    onClick={() => handleResolveReset(request.id, "approve")}
+                    disabled={resolvingResetId === request.id || request.expired}
+                    title={
+                      request.expired
+                        ? "This request has expired; ask the user to submit a new one."
+                        : undefined
+                    }
+                    type="button"
+                  >
+                    <span className="material-symbols-outlined text-[17px]">
+                      key
+                    </span>
+                    {resolvingResetId === request.id
+                      ? "Issuing..."
+                      : "Approve & issue password"}
+                  </button>
+                </div>
+              </div>
+            ))}
           </section>
 
           <div className="grid grid-cols-[minmax(280px,0.82fr)_minmax(0,1.5fr)] items-start gap-[18px] max-[850px]:grid-cols-1">

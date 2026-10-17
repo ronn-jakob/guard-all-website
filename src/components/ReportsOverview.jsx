@@ -1,19 +1,29 @@
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { Link } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { callAuthFunction } from "../lib/auth.js";
 
 const statusStyles = {
   orange: "border-[#ff9f8f] bg-[#ffe5df] text-[#e05b45]",
   gray: "border-[#c8c8c8] bg-[#f3f3f3] text-[#858585]",
   green: "border-[#73c481] bg-[#e1f6e4] text-[#388b47]",
+  yellow: "border-[#e8cc70] bg-[#fdf5dd] text-[#8a6d1a]",
 };
+
+// Queue filters for the Incoming Reports list.
+const queueFilters = [
+  { value: "all", label: "All items" },
+  { value: "submitted", label: "Submitted" },
+  { value: "awaiting", label: "Awaiting report" },
+];
 
 function StatusPill({ children, tone }) {
   return (
     <span
-      className={`rounded-full border px-3 py-1 text-[11px] font-bold ${statusStyles[tone]}`}
+      className={`rounded-full border px-3 py-1 text-[11px] font-bold ${
+        statusStyles[tone] ?? statusStyles.gray
+      }`}
     >
       {children}
     </span>
@@ -24,6 +34,12 @@ function ReportsOverview() {
   const [reports, setReports] = useState([]);
   const [selectedReportId, setSelectedReportId] = useState(null);
   const [isFullDetailsOpen, setIsFullDetailsOpen] = useState(false);
+  const [isReviewing, setIsReviewing] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+  const [reviewMessage, setReviewMessage] = useState("");
+  const [queueFilter, setQueueFilter] = useState("all");
+  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const filterRef = useRef(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -49,16 +65,77 @@ function ReportsOverview() {
     };
   }, []);
 
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (filterRef.current && !filterRef.current.contains(event.target)) {
+        setIsFilterOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Reload the queue without discarding the current selection.
+  async function refreshReports() {
+    const { reports: incomingReports = [] } = await callAuthFunction(
+      "list-field-reports",
+    );
+    setReports(Array.isArray(incomingReports) ? incomingReports : []);
+  }
+
+  async function handleReviewReport(decision) {
+    if (!selectedReport?.reportUuid) return;
+    setReviewError("");
+    setReviewMessage("");
+    setIsReviewing(true);
+    try {
+      const result = await callAuthFunction("review-field-report", {
+        reportId: selectedReport.reportUuid,
+        decision,
+      });
+      await refreshReports();
+      setReviewMessage(result.message);
+    } catch (error) {
+      setReviewError(error.message);
+    } finally {
+      setIsReviewing(false);
+    }
+  }
+
+  const filteredQueue = reports.filter((report) => {
+    if (queueFilter === "submitted") return !report.isPendingReport;
+    if (queueFilter === "awaiting") return Boolean(report.isPendingReport);
+    return true;
+  });
+  const queueFilterLabel =
+    queueFilters.find((option) => option.value === queueFilter)?.label ??
+    "All items";
+
+  // Keep the open report inside the filtered set, so the detail pane can never
+  // show something that the list is currently hiding.
   const selectedReport =
-    reports.find((report) => report.id === selectedReportId) ||
-    reports[0] ||
+    filteredQueue.find((report) => report.id === selectedReportId) ||
+    filteredQueue[0] ||
     null;
   const selectedReportDetails = selectedReport;
+
+  function applyQueueFilter(nextFilter) {
+    setQueueFilter(nextFilter);
+    setIsFilterOpen(false);
+    const nextQueue = reports.filter((report) => {
+      if (nextFilter === "submitted") return !report.isPendingReport;
+      if (nextFilter === "awaiting") return Boolean(report.isPendingReport);
+      return true;
+    });
+    if (!nextQueue.some((report) => report.id === selectedReportId)) {
+      setSelectedReportId(nextQueue[0]?.id ?? null);
+    }
+  }
 
   return (
     <main className="flex h-screen overflow-hidden bg-[#1f2022] font-sans text-[#063b7c] max-[1024px]:block">
       <Sidebar />
-      <section className="h-screen min-w-0 flex-1 overflow-y-auto bg-[#edf7ff]">
+      <section className="h-screen w-full min-w-0 flex-1 overflow-y-auto bg-[#edf7ff] max-[1024px]:h-[100dvh]">
         <TopBar />
         <div className="px-8 pb-6 pt-7 max-[1024px]:px-6 max-[1024px]:pb-20 max-[1024px]:pt-5 max-[620px]:px-3">
           <header className="mb-5 flex items-end justify-between max-[620px]:items-start max-[620px]:gap-3">
@@ -137,7 +214,7 @@ function ReportsOverview() {
             ))}
           </div>
 
-          <div className="grid grid-cols-[380px_minmax(0,1fr)] gap-4 max-[1100px]:grid-cols-[330px_minmax(0,1fr)] max-[850px]:grid-cols-1">
+          <div className="grid grid-cols-[380px_minmax(0,1fr)] items-start gap-4 max-[1100px]:grid-cols-[330px_minmax(0,1fr)] max-[850px]:grid-cols-1">
             <section className="overflow-hidden rounded-[10px] border border-[#dfe6ec] bg-white shadow-[0_3px_8px_rgb(31_59_82_/_12%)]">
               <header className="flex items-start justify-between border-b border-[#e1e6eb] px-5 py-4">
                 <div>
@@ -146,26 +223,73 @@ function ReportsOverview() {
                   </h2>
                   <p className="m-0 mt-1 text-[12px] text-[#8b949c]">
                     {reports.length
-                      ? `${reports.length} item${reports.length === 1 ? "" : "s"} in current queue`
+                      ? queueFilter === "all"
+                        ? `${reports.length} item${reports.length === 1 ? "" : "s"} in current queue`
+                        : `${filteredQueue.length} of ${reports.length} · ${queueFilterLabel}`
                       : "No reports or reserved jobs in current queue"}
                   </p>
                 </div>
-                <button
-                  className="border-0 bg-transparent p-0 text-[#7b8792]"
-                  type="button"
-                >
-                  <span className="material-symbols-outlined text-[21px]">
-                    filter_alt
-                  </span>
-                </button>
+                <div className="relative" ref={filterRef}>
+                  <button
+                    className={`border-0 bg-transparent p-0 ${
+                      queueFilter === "all" ? "text-[#7b8792]" : "text-[#174f9a]"
+                    }`}
+                    type="button"
+                    aria-expanded={isFilterOpen}
+                    aria-haspopup="true"
+                    title={`Filter the queue (${queueFilterLabel})`}
+                    onClick={() => setIsFilterOpen((isOpen) => !isOpen)}
+                  >
+                    <span className="material-symbols-outlined text-[21px]">
+                      filter_alt
+                    </span>
+                  </button>
+                  {isFilterOpen && (
+                    <div className="absolute right-0 z-30 mt-2 w-48 rounded-[8px] border border-[#d9dfe4] bg-white p-1 shadow-[0_8px_20px_rgba(0,0,0,0.12)]">
+                      {queueFilters.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => applyQueueFilter(option.value)}
+                          className={`flex w-full items-center justify-between rounded-[5px] px-3 py-2 text-left text-[12px] transition-colors ${
+                            queueFilter === option.value
+                              ? "bg-[#e8f1fd] font-bold text-[#1250a0]"
+                              : "text-[#3a434d] hover:bg-[#f1f5f9]"
+                          }`}
+                        >
+                          <span>{option.label}</span>
+                          {queueFilter === option.value && (
+                            <span className="material-symbols-outlined text-[15px]">
+                              check
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </header>
-              <div>
+              <div className="max-h-[580px] overflow-y-auto">
                 {reports.length === 0 ? (
                   <div className="px-5 py-8 text-center text-[13px] text-[#7d8994]">
                     No reports or reserved jobs are waiting in the queue.
                   </div>
+                ) : filteredQueue.length === 0 ? (
+                  <div className="px-5 py-8 text-center text-[13px] text-[#7d8994]">
+                    <p className="m-0">
+                      Nothing matches the <strong>{queueFilterLabel}</strong>{" "}
+                      filter.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => applyQueueFilter("all")}
+                      className="mt-2 border-0 bg-transparent text-[12px] font-bold text-[#174f9a] hover:underline"
+                    >
+                      Show all items
+                    </button>
+                  </div>
                 ) : (
-                  reports.map((report) => (
+                  filteredQueue.map((report) => (
                     <button
                       className={`block w-full border-b border-[#e1e6eb] px-5 py-4 text-left last:border-b-0 transition-colors hover:bg-[#f4f8ff] ${report.id === selectedReportId ? "border-l-4 border-l-[#286fc7] bg-[#eef4ff]" : ""}`}
                       key={report.id}
@@ -180,15 +304,17 @@ function ReportsOverview() {
                           {report.status}
                         </StatusPill>
                       </div>
-                      <h3 className="m-0 mt-3 text-[15px] font-bold text-[#174276]">
+                      <h3 className="m-0 mt-3 truncate text-[15px] font-bold text-[#174276]">
                         {report.client}
                       </h3>
-                      <p className="m-0 mt-1 text-[12px] text-[#7d8994]">
+                      <p className="m-0 mt-1 truncate text-[12px] text-[#7d8994]">
                         {report.service}
                       </p>
-                      <div className="mt-3 flex items-center justify-between text-[11px] text-[#8b949c]">
-                        <span>{report.technician}</span>
-                        <span>{report.time}</span>
+                      <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-[#8b949c]">
+                        <span className="min-w-0 truncate">
+                          {report.technician}
+                        </span>
+                        <span className="shrink-0">{report.time}</span>
                       </div>
                     </button>
                   ))
@@ -266,9 +392,13 @@ function ReportsOverview() {
                             </div>
                           ))}
                           {selectedReport.parts.length > 3 && (
-                            <div className="mt-3 border-t border-[#cbd8e7] pt-3 text-center text-[#68798a]">
+                            <button
+                              type="button"
+                              onClick={() => setIsFullDetailsOpen(true)}
+                              className="mt-3 w-full border-t border-[#cbd8e7] bg-transparent pt-3 text-center text-[#68798a] hover:text-[#174f9a]"
+                            >
                               Show More
-                            </div>
+                            </button>
                           )}
                         </>
                       )}
@@ -345,24 +475,52 @@ function ReportsOverview() {
                       </p>
                     ) : (
                       <div className="flex gap-3 max-[620px]:flex-1">
-                        <Link
-                          className="inline-flex h-10 flex-1 items-center justify-center rounded-[7px] border-2 border-[#c5ccd6] bg-transparent px-4 text-[12px] font-bold text-[#89939e] no-underline"
-                          to="/reports"
-                        >
-                          Return for Correction
-                        </Link>
                         <button
-                          className="flex h-10 flex-1 items-center justify-center gap-2 rounded-[7px] bg-[#1953a5] px-4 text-[12px] font-bold text-white"
+                          className="inline-flex h-10 flex-1 items-center justify-center rounded-[7px] border-2 border-[#c5ccd6] bg-transparent px-4 text-[12px] font-bold text-[#89939e] disabled:cursor-not-allowed disabled:opacity-50"
                           type="button"
+                          disabled={
+                            isReviewing ||
+                            selectedReport.reviewStatus === "returned"
+                          }
+                          onClick={() => handleReviewReport("return")}
+                        >
+                          {selectedReport.reviewStatus === "returned"
+                            ? "Returned"
+                            : "Return for Correction"}
+                        </button>
+                        <button
+                          className="flex h-10 flex-1 items-center justify-center gap-2 rounded-[7px] bg-[#1953a5] px-4 text-[12px] font-bold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                          type="button"
+                          disabled={
+                            isReviewing ||
+                            selectedReport.reviewStatus === "approved"
+                          }
+                          onClick={() => handleReviewReport("approve")}
                         >
                           <span className="material-symbols-outlined text-[17px]">
                             send
                           </span>
-                          Approve for Billing
+                          {isReviewing
+                            ? "Saving..."
+                            : selectedReport.reviewStatus === "approved"
+                              ? "Approved for Billing"
+                              : "Approve for Billing"}
                         </button>
                       </div>
                     )}
                 </footer>
+                {(reviewError || reviewMessage) && (
+                  <p
+                    className={`m-0 border-t px-6 py-3 text-[12px] font-semibold max-[620px]:px-4 ${
+                      reviewError
+                        ? "border-[#f1b7af] bg-[#fff3f1] text-[#a83a2c]"
+                        : "border-[#a8dfb7] bg-[#effaf2] text-[#267340]"
+                    }`}
+                    role={reviewError ? "alert" : "status"}
+                  >
+                    {reviewError || reviewMessage}
+                  </p>
+                )}
               </section>
             ) : (
               <section className="rounded-[10px] border border-dashed border-[#cbd8e7] bg-white px-5 py-8 text-center text-[14px] text-[#778593]">

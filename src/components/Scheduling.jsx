@@ -47,6 +47,112 @@ function getTechnicianRoleUsers(technicians) {
   return technicians.filter((technician) => technician.roleName === "Technician");
 }
 
+// Sunday-first, matching the Calendar view's column order.
+const DAY_LABELS = ["S", "M", "T", "W", "TH", "F", "ST"];
+
+// Kept in sync with the public.job_type enum; the backend's jobTypeFor maps
+// these labels to installation / maintenance / inspection / repair.
+const SERVICE_TYPES = [
+  "Service call",
+  "Preventive maintenance",
+  "Installation",
+  "Inspection",
+];
+
+// Row shape shared by the schedule list and the selected-job panel.
+// Index order is load-bearing and must stay in sync with mapScheduleRow:
+// 0 time, 1 day, 2 client, 3 order, 4 service, 5 location, 6 technician,
+// 7 stock, 8 technicians, 9 status, 10 branch, 11 date,
+// 12 partsStatus, 13 assignmentConfirmedAt.
+function mapScheduleRow(job) {
+  return [
+    job.time,
+    job.dayLabel,
+    job.client,
+    job.order,
+    job.service,
+    job.location,
+    job.technician,
+    job.stock,
+    job.technicians,
+    job.status,
+    job.branch,
+    job.date,
+    job.partsStatus,
+    job.assignmentConfirmedAt,
+  ];
+}
+
+const STAGE_STYLES = {
+  done: "border-[#a8dfb7] bg-[#effaf2] text-[#267340]",
+  ready: "border-[#a8dfb7] bg-[#effaf2] text-[#267340]",
+  active: "border-[#bcd3ee] bg-[#eef4ff] text-[#1250a0]",
+  waiting: "border-[#ffd9a3] bg-[#fff7e8] text-[#a86a12]",
+  todo: "border-[#ffc9b8] bg-[#fff3ef] text-[#d0552f]",
+};
+
+// Stock is reserved (or not needed), so the job has reached the scheduled stage.
+function isStockAllocated(partsStatus) {
+  return partsStatus === "confirmed" || partsStatus === "not_required";
+}
+
+// Workflow stage shown on the badge:
+//   Waiting confirmation -> assignment not confirmed yet
+//   Pending              -> confirmed, queued for stock allocation
+//   Scheduled            -> stock allocated (parts_status = confirmed)
+function getJobStage({ status, partsStatus, assignmentConfirmed }) {
+  if (status === "completed") {
+    return { label: "Completed", style: STAGE_STYLES.done };
+  }
+  if (status === "in_progress") {
+    return { label: "In progress", style: STAGE_STYLES.active };
+  }
+  if (isStockAllocated(partsStatus)) {
+    return { label: "Scheduled", style: STAGE_STYLES.ready };
+  }
+  if (assignmentConfirmed) {
+    return { label: "Pending", style: STAGE_STYLES.waiting };
+  }
+  return { label: "Waiting confirmation", style: STAGE_STYLES.todo };
+}
+
+function formatShortDate(dateValue) {
+  const [year, month, day] = String(dateValue ?? "").split("-").map(Number);
+  if (!year || !month || !day) return "";
+  return new Date(year, month - 1, day)
+    .toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    .toUpperCase();
+}
+
+function capitalizeFirst(value) {
+  return String(value ?? "").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function formatLongDate(dateValue) {
+  const [year, month, day] = String(dateValue ?? "").split("-").map(Number);
+  if (!year || !month || !day) return "";
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function DetailRow({ icon, label, children }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-[#eef2f6] px-3 py-2 last:border-b-0">
+      <dt className="flex flex-none items-center gap-1.5 text-[10px] uppercase tracking-[.06em] text-[#89939c]">
+        <span className="material-symbols-outlined text-[14px]">{icon}</span>
+        {label}
+      </dt>
+      <dd className="m-0 min-w-0 text-right text-[12px] font-semibold text-[#263747]">
+        {children}
+      </dd>
+    </div>
+  );
+}
+
 function Scheduling() {
   const [selectedOrder, setSelectedOrder] = useState("");
   const [isCreateJobOpen, setIsCreateJobOpen] = useState(false);
@@ -80,6 +186,10 @@ function Scheduling() {
   const [viewMode, setViewMode] = useState("list");
   const [rangeStart, setRangeStart] = useState(getToday);
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(getToday);
+  // Day-of-week filter for the weekly list. null shows the whole week.
+  const [dayFilter, setDayFilter] = useState(null);
+  const [isConfirmingAssignment, setIsConfirmingAssignment] = useState(false);
+  const [confirmError, setConfirmError] = useState({ order: "", message: "" });
 
   useEffect(() => {
     let isMounted = true;
@@ -89,19 +199,7 @@ function Scheduling() {
         const nextDates = Object.fromEntries(
           schedules.map((job) => [job.order, new Date(`${job.date}T00:00:00`)]),
         );
-        setSchedule(
-          schedules.map((job) => [
-            job.time,
-            job.dayLabel,
-            job.client,
-            job.order,
-            job.service,
-            job.location,
-            job.technician,
-            job.stock,
-            job.technicians,
-          ]),
-        );
+        setSchedule(schedules.map(mapScheduleRow));
         setScheduledJobDates(nextDates);
       })
       .catch((error) => {
@@ -150,15 +248,36 @@ function Scheduling() {
     };
   }, [isEditJobOpen, editValues.date, editValues.order]);
 
-  const rangeEnd = new Date(
+  // Weekly list range: the Sunday-Saturday week containing the anchored date.
+  const weekStart = new Date(
     rangeStart.getFullYear(),
     rangeStart.getMonth(),
-    rangeStart.getDate() + 9,
+    rangeStart.getDate() - rangeStart.getDay(),
   );
+  const weekEnd = new Date(
+    weekStart.getFullYear(),
+    weekStart.getMonth(),
+    weekStart.getDate() + 6,
+  );
+  const isCurrentWeek =
+    getDateKey(getToday()) >= getDateKey(weekStart) &&
+    getDateKey(getToday()) <= getDateKey(weekEnd);
   const scheduledJobsInRange = schedule.filter((job) => {
     const jobDate = scheduledJobDates[job[3]];
-    return jobDate >= rangeStart && jobDate <= rangeEnd;
+    return jobDate >= weekStart && jobDate <= weekEnd;
   });
+  const weekDays = Array.from({ length: 7 }, (_, index) =>
+    new Date(
+      weekStart.getFullYear(),
+      weekStart.getMonth(),
+      weekStart.getDate() + index,
+    ),
+  );
+  const listJobs = dayFilter
+    ? scheduledJobsInRange.filter(
+        (job) => getDateKey(scheduledJobDates[job[3]]) === dayFilter,
+      )
+    : scheduledJobsInRange;
   const calendarMonthStart = new Date(
     rangeStart.getFullYear(),
     rangeStart.getMonth(),
@@ -195,6 +314,7 @@ function Scheduling() {
   });
 
   function changeDateRange(dayOffset) {
+    setDayFilter(null);
     setRangeStart(
       (currentStart) =>
         new Date(
@@ -211,6 +331,7 @@ function Scheduling() {
       rangeStart.getMonth() + monthOffset,
       1,
     );
+    setDayFilter(null);
     setRangeStart(nextMonth);
     setSelectedCalendarDate(nextMonth);
   }
@@ -226,7 +347,7 @@ function Scheduling() {
   }
 
   const defaultVisibleJob =
-    viewMode === "calendar" ? selectedDayJobs[0] : scheduledJobsInRange[0];
+    viewMode === "calendar" ? selectedDayJobs[0] : listJobs[0];
   const selectedJob = schedule.find((job) => job[3] === selectedOrder) ??
     defaultVisibleJob ?? [
       "--:--",
@@ -237,11 +358,51 @@ function Scheduling() {
       "Select a date to view jobs",
       "Unassigned",
       "Available",
+      [],
+      "",
+      "",
+      "",
+      "",
+      "",
     ];
+  const [
+    jobTime,
+    ,
+    jobClient,
+    jobOrder,
+    jobService,
+    jobLocation,
+    ,
+    jobStock,
+    jobTechnicians,
+    jobStatus,
+    jobBranch,
+    jobDate,
+    jobPartsStatus,
+    jobAssignmentConfirmedAt,
+  ] = selectedJob;
+  // The DB timestamp is authoritative and shared; the local set only covers the
+  // moment between confirming and the next schedule refresh.
+  const isAssignmentConfirmed =
+    Boolean(jobAssignmentConfirmedAt) || confirmedAssignments.has(jobOrder);
+  const selectedJobStage = getJobStage({
+    status: jobStatus,
+    partsStatus: jobPartsStatus,
+    assignmentConfirmed: isAssignmentConfirmed,
+  });
 
-  function handleConfirmAssignment() {
+  async function handleConfirmAssignment() {
     const order = selectedJob[3];
     if (!order) return;
+    setConfirmError({ order: "", message: "" });
+    setIsConfirmingAssignment(true);
+    try {
+      await callAuthFunction("confirm-job-assignment", { jobNumber: order });
+    } catch (error) {
+      setConfirmError({ order, message: error.message });
+      setIsConfirmingAssignment(false);
+      return;
+    }
     const nextConfirmedAssignments = new Set(confirmedAssignments);
     nextConfirmedAssignments.add(order);
     setConfirmedAssignments(nextConfirmedAssignments);
@@ -249,6 +410,7 @@ function Scheduling() {
       confirmedAssignmentsKey,
       JSON.stringify([...nextConfirmedAssignments]),
     );
+    setIsConfirmingAssignment(false);
     navigate(`/inventory/allocate?job=${encodeURIComponent(order)}`);
   }
 
@@ -280,19 +442,7 @@ function Scheduling() {
           new Date(`${job.date}T00:00:00`),
         ]),
       );
-      setSchedule(
-        (schedules || []).map((job) => [
-          job.time,
-          job.dayLabel,
-          job.client,
-          job.order,
-          job.service,
-          job.location,
-          job.technician,
-          job.stock,
-          job.technicians,
-        ]),
-      );
+      setSchedule((schedules || []).map(mapScheduleRow));
       setScheduledJobDates(nextDates);
       setTechnicians([""]);
       setIsCreateJobOpen(false);
@@ -309,18 +459,17 @@ function Scheduling() {
     const endDate = new Date(2026, 0, 1, hours + 1, minutes);
     setEditValues({
       order: selectedJob[3],
-      serviceType:
-        selectedJob[4] === "Preventive maintenance"
-          ? "Preventive maintenance"
-          : selectedJob[4] === "Installation"
-            ? "Installation"
-            : "Service call",
+      serviceType: SERVICE_TYPES.includes(selectedJob[4])
+        ? selectedJob[4]
+        : "Service call",
       date: getDateKey(
         scheduledJobDates[selectedJob[3]] || selectedCalendarDate,
       ),
       startTime,
       endTime: `${String(endDate.getHours()).padStart(2, "0")}:${String(endDate.getMinutes()).padStart(2, "0")}`,
-      branch: selectedJob[5]?.split(" - ")[0] || defaultBranch,
+      branch: selectedJob[10]
+        ? capitalizeFirst(selectedJob[10])
+        : defaultBranch,
     });
     setEditTechnicians(
       selectedJob[8]?.length
@@ -353,19 +502,7 @@ function Scheduling() {
           new Date(`${job.date}T00:00:00`),
         ]),
       );
-      setSchedule(
-        (schedules || []).map((job) => [
-          job.time,
-          job.dayLabel,
-          job.client,
-          job.order,
-          job.service,
-          job.location,
-          job.technician,
-          job.stock,
-          job.technicians,
-        ]),
-      );
+      setSchedule((schedules || []).map(mapScheduleRow));
       setScheduledJobDates(nextDates);
       setSelectedCalendarDate(new Date(`${formData.get("date")}T00:00:00`));
       setIsEditJobOpen(false);
@@ -380,7 +517,7 @@ function Scheduling() {
     <main className="flex h-screen overflow-hidden bg-[#202123] font-sans text-[#174f9a] max-[1024px]:block">
       <Sidebar />
 
-      <section className="h-screen min-w-0 flex-1 overflow-y-auto bg-[#edf7ff]">
+      <section className="h-screen w-full min-w-0 flex-1 overflow-y-auto bg-[#edf7ff] max-[1024px]:h-[100dvh]">
         <TopBar />
         <div className="px-8 pb-6 pt-8 max-[1024px]:px-6 max-[1024px]:pb-20 max-[1024px]:pt-5 max-[620px]:px-3">
           <div className="mb-7 flex items-end justify-between gap-5 max-[620px]:mb-4 max-[620px]:items-start">
@@ -408,17 +545,17 @@ function Scheduling() {
 
           <div className="grid grid-cols-[minmax(0,2fr)_minmax(300px,1fr)] gap-[18px] max-[620px]:grid-cols-1">
             <section className="flex flex-col overflow-hidden rounded-[12px] border border-[#dfe6ec] bg-white shadow-[0_3px_8px_rgb(31_59_82_/_14%)]">
-              <header className="flex h-[84px] shrink-0 items-center justify-between border-b border-[#e1e6eb] px-6 max-[1024px]:h-[57px] max-[1024px]:px-3">
-                <div className="flex items-center gap-3">
+              <header className="flex h-[84px] shrink-0 items-center justify-between border-b border-[#e1e6eb] px-6 max-[1024px]:h-auto max-[1024px]:min-h-[57px] max-[1024px]:px-3 max-[620px]:flex-wrap max-[620px]:gap-y-2 max-[620px]:py-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 max-[620px]:gap-x-2">
                   <button
                     type="button"
                     onClick={() =>
                       viewMode === "calendar"
                         ? changeCalendarMonth(-1)
-                        : changeDateRange(-10)
+                        : changeDateRange(-7)
                     }
-                    aria-label="Previous date range"
-                    className="grid h-9 w-9 place-items-center rounded-[6px] border border-[#e5e9ed] bg-white text-[#89939b] max-[620px]:hidden"
+                    aria-label="Previous week"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-[6px] border border-[#e5e9ed] bg-white text-[#89939b] max-[620px]:h-7 max-[620px]:w-7"
                   >
                     <span className="material-symbols-outlined text-[20px]">
                       chevron_left
@@ -428,12 +565,16 @@ function Scheduling() {
                     <strong className="text-[15px] max-[1024px]:text-[12px] max-[620px]:text-[11px]">
                       {viewMode === "calendar"
                         ? formatMonthLabel(calendarMonthStart)
-                        : formatDateRange(rangeStart, rangeEnd)}
+                        : formatDateRange(weekStart, weekEnd)}
                     </strong>
                     <small className="block text-[10px] text-[#8f989f] max-[1024px]:text-[8px]">
                       {viewMode === "calendar"
                         ? `${scheduledJobsInCalendarMonth.length} jobs scheduled this month`
-                        : `10-day period · ${scheduledJobsInRange.length} jobs scheduled`}
+                        : dayFilter
+                          ? `${formatSelectedDate(new Date(`${dayFilter}T00:00:00`)).split(",")[0]} · ${listJobs.length} ${listJobs.length === 1 ? "job" : "jobs"}`
+                          : isCurrentWeek
+                            ? `This week · ${listJobs.length} jobs scheduled`
+                            : `Week · ${listJobs.length} jobs scheduled`}
                     </small>
                   </div>
                   <button
@@ -441,18 +582,56 @@ function Scheduling() {
                     onClick={() =>
                       viewMode === "calendar"
                         ? changeCalendarMonth(1)
-                        : changeDateRange(10)
+                        : changeDateRange(7)
                     }
-                    aria-label="Next date range"
-                    className="grid h-9 w-9 place-items-center rounded-[6px] border border-[#e5e9ed] bg-white text-[#89939b] max-[620px]:hidden"
+                    aria-label="Next week"
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-[6px] border border-[#e5e9ed] bg-white text-[#89939b] max-[620px]:h-7 max-[620px]:w-7"
                   >
                     <span className="material-symbols-outlined text-[20px]">
                       chevron_right
                     </span>
                   </button>
-                </div>
 
-                {/* Dynamic Toggle Controls */}
+                  {/* Day-of-week filter (list view only) */}
+                  {viewMode === "list" && (
+                    <div className="flex items-center gap-1 max-[620px]:w-full max-[620px]:justify-between">
+                      {weekDays.map((date) => {
+                        const dateKey = getDateKey(date);
+                        const isActive = dayFilter === dateKey;
+                        const jobsOnDay = schedule.filter(
+                          (job) =>
+                            getDateKey(scheduledJobDates[job[3]]) === dateKey,
+                        ).length;
+                        return (
+                          <button
+                            key={dateKey}
+                            type="button"
+                            aria-label={`${formatSelectedDate(date)}, ${jobsOnDay} ${jobsOnDay === 1 ? "job" : "jobs"}`}
+                            aria-pressed={isActive}
+                            title={`${formatSelectedDate(date)} · ${jobsOnDay} ${jobsOnDay === 1 ? "job" : "jobs"}`}
+                            onClick={() => {
+                              if (isActive) {
+                                setDayFilter(null);
+                                return;
+                              }
+                              setDayFilter(dateKey);
+                              handleCalendarDateClick(date);
+                            }}
+                            className={`h-8 min-w-[34px] rounded-[6px] px-1 text-[11px] font-bold transition-colors max-[620px]:h-7 max-[620px]:min-w-[30px] max-[620px]:text-[10px] ${
+                              isActive
+                                ? "bg-[#1250a0] text-white"
+                                : jobsOnDay > 0
+                                  ? "border border-[#bcd3ee] bg-[#eef4ff] text-[#1250a0] hover:border-[#1250a0]"
+                                  : "border border-[#e5e9ed] bg-white text-[#82909c] hover:border-[#1250a0] hover:text-[#1250a0]"
+                            }`}
+                          >
+                            {DAY_LABELS[date.getDay()]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
                 <div className="flex rounded-[7px] bg-[#f4f7fb] p-1 text-[11px] font-bold max-[1024px]:text-[9px]">
                   <button
                     type="button"
@@ -483,7 +662,14 @@ function Scheduling() {
               <div className="h-[430px] overflow-y-auto max-[1024px]:h-[380px] max-[620px]:h-[350px]">
                 {viewMode === "list" ? (
                   <div className="divide-y divide-[#e5e8eb]">
-                    {scheduledJobsInRange.map(
+                    {listJobs.length === 0 && (
+                      <p className="m-0 px-6 py-10 text-center text-[12px] text-[#8d969e]">
+                        {dayFilter
+                          ? "No jobs scheduled for this day."
+                          : "No jobs scheduled this week."}
+                      </p>
+                    )}
+                    {listJobs.map(
                       ([
                         time,
                         day,
@@ -493,8 +679,21 @@ function Scheduling() {
                         location,
                         technician,
                         stock,
+                        ,
+                        jobStatus,
+                        branch,
+                        date,
+                        jobPartsStatus,
+                        jobConfirmedAt,
                       ]) => {
                         const isSelected = selectedOrder === order;
+                        const stage = getJobStage({
+                          status: jobStatus,
+                          partsStatus: jobPartsStatus,
+                          assignmentConfirmed:
+                            Boolean(jobConfirmedAt) ||
+                            confirmedAssignments.has(order),
+                        });
                         return (
                           <button
                             type="button"
@@ -506,25 +705,47 @@ function Scheduling() {
                             key={order}
                             onClick={() => setSelectedOrder(order)}
                           >
-                            <div className="w-[70px] flex-none max-[1024px]:w-[50px]">
+                            <div className="w-[74px] flex-none max-[1024px]:w-[54px]">
                               <strong className="block text-[14px] max-[1024px]:text-[11px] max-[620px]:text-[10px]">
                                 {time}
                               </strong>
-                              <small className="text-[10px] text-[#929aa1] max-[1024px]:text-[8px]">
+                              <small className="block text-[10px] text-[#929aa1] max-[1024px]:text-[8px]">
                                 {day}
+                              </small>
+                              <small className="mt-0.5 block font-semibold text-[9px] text-[#7f8992] max-[1024px]:text-[8px]">
+                                {formatShortDate(date)}
                               </small>
                             </div>
                             <div className="min-w-0 flex-1">
-                              <div className="flex flex-wrap items-baseline gap-1.5">
+                              <div className="flex flex-wrap items-center gap-1.5">
                                 <strong className="truncate text-[13px] max-[1024px]:text-[11px] max-[620px]:text-[10px]">
                                   {client}
                                 </strong>
-                                <small className="text-[10px] text-[#8c969f] max-[1024px]:text-[8px]">
-                                  {order}
-                                </small>
+                                <span
+                                  className={`rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[.04em] max-[1024px]:text-[7px] ${stage.style}`}
+                                >
+                                  {stage.label}
+                                </span>
                               </div>
-                              <p className="m-0 mt-0.5 truncate text-[10px] text-[#8b949c] max-[1024px]:text-[8px]">
-                                {service} · {location}
+                              <p className="m-0 mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-[#8b949c] max-[1024px]:text-[8px]">
+                                <span className="font-semibold text-[#6d879f]">
+                                  {order}
+                                </span>
+                                <span className="text-[#c3ccd4]">|</span>
+                                <span className="truncate">{service}</span>
+                                <span className="text-[#c3ccd4]">|</span>
+                                <span className="inline-flex items-center">
+                                  <span className="material-symbols-outlined mr-0.5 align-middle text-[13px]">
+                                    apartment
+                                  </span>
+                                  {capitalizeFirst(branch)}
+                                </span>
+                              </p>
+                              <p className="m-0 mt-0.5 flex items-center text-[10px] text-[#8b949c] max-[1024px]:text-[8px]">
+                                <span className="material-symbols-outlined mr-0.5 flex-none align-middle text-[13px]">
+                                  location_on
+                                </span>
+                                <span className="truncate">{location}</span>
                               </p>
                               <div className="mt-1 flex flex-wrap gap-3 text-[10px] text-[#7f8992] max-[1024px]:gap-2 max-[1024px]:text-[8px]">
                                 <span className="truncate">
@@ -667,26 +888,35 @@ function Scheduling() {
             </section>
 
             <aside className="min-h-[518px] rounded-[12px] border border-[#dfe6ec] bg-[#f9fbfd] p-5 shadow-[0_3px_8px_rgb(31_59_82_/_10%)] max-[1024px]:min-h-[455px] max-[1024px]:p-4 max-[620px]:min-h-0 max-[620px]:rounded-[7px] max-[620px]:p-3">
-              <div className="flex items-start justify-between">
-                <div>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
                   <p className="m-0 text-[10px] uppercase tracking-[.08em] text-[#87929c]">
                     Selected work order
                   </p>
-                  <small className="mt-2 block text-[10px] font-bold text-[#50719a]">
-                    {selectedJob[3]}
-                  </small>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <small className="text-[10px] font-bold text-[#50719a]">
+                      {jobOrder || "—"}
+                    </small>
+                    {jobOrder && (
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-[.04em] ${selectedJobStage.style}`}
+                      >
+                        {selectedJobStage.label}
+                      </span>
+                    )}
+                  </div>
                   <h2 className="m-0 mt-2 text-[23px] font-bold leading-tight max-[1024px]:text-[17px]">
-                    {selectedJob[2]}
+                    {jobClient}
                   </h2>
-                  <p className="m-0 mt-2 text-[10px] text-[#8a949c]">
-                    <span className="material-symbols-outlined mr-1 align-middle text-[15px]">
+                  <p className="m-0 mt-2 flex items-start text-[10px] text-[#8a949c]">
+                    <span className="material-symbols-outlined mr-1 flex-none align-middle text-[15px]">
                       location_on
                     </span>
-                    {selectedJob[5]}
+                    <span className="min-w-0">{jobLocation}</span>
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
-                  {selectedJob[3] && (
+                <div className="flex flex-none items-center gap-2">
+                  {jobOrder && (
                     <button
                       type="button"
                       onClick={openEditJob}
@@ -700,8 +930,8 @@ function Scheduling() {
                     </button>
                   )}
                   <span className="rounded-[6px] bg-white px-3 py-2 text-[9px] text-[#6d879f] shadow-sm">
-                    {scheduledJobDates[selectedJob[3]]
-                      ? formatSelectedDate(scheduledJobDates[selectedJob[3]])
+                    {scheduledJobDates[jobOrder]
+                      ? formatSelectedDate(scheduledJobDates[jobOrder])
                           .split(",")[0]
                           .toUpperCase()
                       : "SCHEDULED"}
@@ -709,38 +939,74 @@ function Scheduling() {
                 </div>
               </div>
 
-              <div className="mt-6 grid grid-cols-2 gap-2 max-[1024px]:mt-4">
-                <div className="rounded-[6px] bg-white p-3 shadow-sm">
-                  <small className="block text-[9px] uppercase text-[#89939c]">
-                    Service type
-                  </small>
-                  <strong className="mt-1 block text-[13px] max-[1024px]:text-[10px]">
-                    {selectedJob[4]}
-                  </strong>
-                </div>
-                <div className="rounded-[6px] bg-white p-3 shadow-sm">
-                  <small className="block text-[9px] uppercase text-[#89939c]">
-                    Technician
-                  </small>
-                  <strong className="mt-1 block text-[13px]">
-                    {selectedJob[6]}
-                  </strong>
-                </div>
-              </div>
+              <dl className="mt-5 overflow-hidden rounded-[8px] border border-[#e4eaf0] bg-white shadow-sm max-[1024px]:mt-4">
+                <DetailRow icon="tag" label="Job number">
+                  {jobOrder || "—"}
+                </DetailRow>
+                <DetailRow icon="apartment" label="Branch">
+                  {jobBranch ? capitalizeFirst(jobBranch) : "—"}
+                </DetailRow>
+                <DetailRow icon="build" label="Service type">
+                  {jobService || "—"}
+                </DetailRow>
+                <DetailRow icon="event" label="Schedule">
+                  {jobDate ? formatLongDate(jobDate) : "—"}
+                </DetailRow>
+                <DetailRow icon="schedule" label="Start time">
+                  {jobTime || "—"}
+                </DetailRow>
+                <DetailRow icon="location_on" label="Site">
+                  <span className="block">{jobLocation || "—"}</span>
+                </DetailRow>
+                <DetailRow icon="person" label="Technicians">
+                  {jobTechnicians?.length ? (
+                    <span className="block">
+                      {jobTechnicians.map((technician) => (
+                        <span className="block" key={technician.id}>
+                          {technician.name}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    "Unassigned"
+                  )}
+                </DetailRow>
+                <DetailRow icon="inventory_2" label="Parts / stock">
+                  {jobStock || "—"}
+                </DetailRow>
+              </dl>
 
               <button
                 type="button"
-                disabled={!selectedJob[3]}
+                disabled={
+                  !jobOrder || isConfirmingAssignment || isStockAllocated(jobPartsStatus)
+                }
                 onClick={handleConfirmAssignment}
-                className="mt-3 flex w-full items-center justify-center gap-2 rounded-[6px] bg-[#1250a0] py-3 text-[12px] font-bold text-white hover:bg-[#0e4388] disabled:cursor-not-allowed disabled:bg-[#86a7d5] max-[1024px]:py-2 max-[1024px]:text-[9px]"
+                className={`mt-3 flex w-full items-center justify-center gap-2 rounded-[6px] py-3 text-[12px] font-bold text-white max-[1024px]:py-2 max-[1024px]:text-[9px] ${
+                  isStockAllocated(jobPartsStatus)
+                    ? "cursor-default bg-[#267340]"
+                    : "bg-[#1250a0] hover:bg-[#0e4388] disabled:cursor-not-allowed disabled:bg-[#86a7d5]"
+                }`}
               >
                 <span className="material-symbols-outlined text-[18px]">
-                  check
+                  {isStockAllocated(jobPartsStatus) ? "event_available" : "check"}
                 </span>
-                {confirmedAssignments.has(selectedJob[3])
-                  ? "Continue to inventory request"
-                  : "Confirm assignment"}
+                {isStockAllocated(jobPartsStatus)
+                  ? "Job scheduled"
+                  : isConfirmingAssignment
+                    ? "Confirming..."
+                    : isAssignmentConfirmed
+                      ? "Continue to inventory request"
+                      : "Confirm assignment"}
               </button>
+              {confirmError.message && confirmError.order === jobOrder && (
+                <p
+                  className="m-0 mt-2 rounded-[6px] border border-[#f0b8b0] bg-[#fff1ee] px-3 py-2 text-[11px] text-[#b64132]"
+                  role="alert"
+                >
+                  {confirmError.message}
+                </p>
+              )}
             </aside>
           </div>
 
@@ -802,9 +1068,9 @@ function Scheduling() {
                   }
                   className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
                 >
-                  <option>Service call</option>
-                  <option>Preventive maintenance</option>
-                  <option>Installation</option>
+                  {SERVICE_TYPES.map((type) => (
+                    <option key={type}>{type}</option>
+                  ))}
                 </select>
               </label>
               <div className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
@@ -1100,10 +1366,9 @@ function Scheduling() {
                     defaultValue="Service call"
                     className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
                   >
-                    <option>Service call</option>
-                    <option>Preventive maintenance</option>
-                    <option>Installation</option>
-                    <option>Inspection</option>
+                    {SERVICE_TYPES.map((type) => (
+                      <option key={type}>{type}</option>
+                    ))}
                   </select>
                 </label>
               </div>

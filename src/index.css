@@ -1,5 +1,34 @@
 @import "tailwindcss";
 
+/* Responsive base styles */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 100vw;
+}
+
+/* Prevent text overflow and ensure wrapping */
+body {
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Improve touch targets on mobile */
+@media (max-width: 640px) {
+  button,
+  a,
+  input[type="button"],
+  input[type="submit"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
 main [class*="text-[6px]"],
 main [class*="text-[7px]"],
 main [class*="text-[8px]"],
@@ -25,5 +54,16 @@ main > section > nav a {
 @media (max-width: 850px) {
   main > aside nav a {
     font-size: 0 !important;
+  }
+}
+
+/* Mobile-first responsive utilities */
+@media (max-width: 480px) {
+  .mobile-stack {
+    flex-direction: column !important;
+  }
+
+  .mobile-full-width {
+    width: 100% !important;
   }
 }

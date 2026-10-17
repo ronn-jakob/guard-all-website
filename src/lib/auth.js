@@ -11,9 +11,10 @@ export const roleAccess = {
 
 export async function callAuthFunction(action, payload = {}) {
   const token = sessionStorage.getItem("authToken");
-  const functionName = ["create-account", "change-password"].includes(action)
-    ? "guard-account"
-    : "guard-auth";
+  // Account creation lives in guard-account (Admin-only). Password changes go to
+  // guard-auth, which lets any signed-in user change their own password;
+  // guard-account's change-password requires the Admin role.
+  const functionName = action === "create-account" ? "guard-account" : "guard-auth";
   const { data, error } = await supabase.functions.invoke(functionName, {
     body: { action, ...payload },
     headers: token ? { Authorization: `Bearer ${token}` } : {},

@@ -1,5 +1,6 @@
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
+import { Link } from "react-router-dom";
 import { getSession } from "../lib/auth.js";
 
 const metrics = [];
@@ -21,7 +22,7 @@ function Dashboard() {
   return (
     <main className="flex h-screen overflow-hidden bg-[#1f2022] font-sans text-[#063b7c] max-[1024px]:block">
       <Sidebar />
-      <section className="h-screen min-w-0 flex-1 overflow-y-auto bg-[#edf7ff]">
+      <section className="h-screen w-full min-w-0 flex-1 overflow-y-auto bg-[#edf7ff] max-[1024px]:h-[100dvh]">
         <TopBar />
         <div className="px-8 pb-6 pt-9 max-[1024px]:px-6 max-[1024px]:pb-20 max-[1024px]:pt-5 max-[620px]:px-3">
           <h1 className="m-0 mb-6 text-[30px] font-bold tracking-[-.5px] max-[1024px]:text-[24px] max-[620px]:mb-4 max-[620px]:text-[19px]">
@@ -69,15 +70,15 @@ function Dashboard() {
                     Upcoming jobs
                   </h2>
                 </div>
-                <a
+                <Link
                   className="text-[11px] font-bold text-[#063b7c] no-underline max-[1024px]:text-[7px]"
-                  href="#schedule"
+                  to="/scheduling"
                 >
                   Open schedule{" "}
                   <span className="material-symbols-outlined ml-1 align-middle text-[20px]">
                     chevron_right
                   </span>
-                </a>
+                </Link>
               </header>
               <div className="border-t border-[#e0e6eb]" role="table">
                 <div
