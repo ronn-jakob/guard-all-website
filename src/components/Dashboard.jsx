@@ -1,10 +1,34 @@
+import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { Link } from "react-router-dom";
-import { getSession } from "../lib/auth.js";
+import { callAuthFunction, getSession } from "../lib/auth.js";
 
-const metrics = [];
-const jobs = [];
+const formatPeso = (value) =>
+  `₱${Number(value || 0).toLocaleString("en-PH", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
+const formatShortDate = (value) =>
+  value
+    ? new Date(`${value}T00:00:00`).toLocaleDateString("en-GB", {
+        day: "2-digit",
+        month: "short",
+      })
+    : "";
+
+const partsBadge = (partsStatus) => {
+  if (partsStatus === "confirmed") return "Parts ready";
+  if (partsStatus === "not_required") return "No parts";
+  return "Awaiting parts";
+};
+
+const stockStatus = (partsStatus) => {
+  if (partsStatus === "confirmed") return "Available";
+  if (partsStatus === "not_required") return "Not needed";
+  return "Pending";
+};
 
 const row =
   "grid grid-cols-[1.05fr_1.42fr_1.18fr_1fr_28px] items-center px-5 max-[620px]:grid-cols-[1fr_1.5fr_1.2fr_22px] max-[620px]:px-[9px]";
@@ -19,6 +43,100 @@ function Dashboard() {
       ? `${nameParts[0][0].toUpperCase()}. ${nameParts.slice(1).join(" ")}`
       : accountName;
 
+  const [summary, setSummary] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+    callAuthFunction("dashboard-summary")
+      .then((result) => {
+        if (!isMounted) return;
+        setSummary(result);
+        setLoadError("");
+      })
+      .catch((error) => {
+        if (isMounted) setLoadError(error.message);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoading(false);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const counts = summary?.counts ?? {};
+  const jobs = summary?.jobs ?? [];
+  const openInvoices = counts.openInvoices ?? null;
+
+  const metrics = [
+    [
+      "event",
+      "Jobs today",
+      String(counts.todayJobs ?? 0),
+      `${counts.upcomingJobs ?? 0} upcoming`,
+      "bg-[#d6e6fb] text-[#1954a0]",
+      false,
+    ],
+    [
+      "pending_actions",
+      "Awaiting stock",
+      String(counts.pendingAllocation ?? 0),
+      "Confirmed jobs without parts",
+      "bg-[#d6e6fb] text-[#1954a0]",
+      (counts.pendingAllocation ?? 0) > 0,
+    ],
+    [
+      "assignment",
+      "Reports in review",
+      String(counts.reportsAwaitingReview ?? 0),
+      "Waiting for a manager",
+      "bg-[#d6e6fb] text-[#1954a0]",
+      (counts.reportsAwaitingReview ?? 0) > 0,
+    ],
+    openInvoices
+      ? [
+          "account_balance",
+          "Outstanding",
+          formatPeso(openInvoices.amount),
+          `${openInvoices.count} unpaid ${openInvoices.count === 1 ? "invoice" : "invoices"}`,
+          "bg-[#d6e6fb] text-[#1954a0]",
+          openInvoices.count > 0,
+        ]
+      : [
+          "warning",
+          "Below reorder point",
+          String(counts.lowStock ?? 0),
+          "Requires procurement",
+          "bg-[#ffd5cc] text-[#ff725f]",
+          (counts.lowStock ?? 0) > 0,
+        ],
+  ];
+
+  const pulseItems = [
+    {
+      icon: "warning",
+      color: "text-[#ff725f]",
+      title: "Parts below reorder point",
+      note: `${counts.lowStock ?? 0} ${(counts.lowStock ?? 0) === 1 ? "part needs" : "parts need"} procurement`,
+    },
+    {
+      icon: "assignment",
+      color: "text-[#2467ae]",
+      title: "Reports in review queue",
+      note: `${counts.reportsAwaitingReview ?? 0} awaiting a decision`,
+    },
+  ];
+  if (openInvoices) {
+    pulseItems.push({
+      icon: "account_balance",
+      color: "text-[#063b7c]",
+      title: "Outstanding invoices",
+      note: `${openInvoices.count} open · ${formatPeso(openInvoices.amount)}`,
+    });
+  }
+
   return (
     <main className="flex h-screen overflow-hidden bg-[#1f2022] font-sans text-[#063b7c] max-[1024px]:block">
       <Sidebar />
@@ -28,6 +146,16 @@ function Dashboard() {
           <h1 className="m-0 mb-6 text-[30px] font-bold tracking-[-.5px] max-[1024px]:text-[24px] max-[620px]:mb-4 max-[620px]:text-[19px]">
             Good morning, {greetingName}
           </h1>
+
+          {loadError && (
+            <p
+              className="mb-4 rounded-[6px] border border-[#f1b7af] bg-[#fff3f1] px-4 py-3 text-[12px] text-[#a83a2c]"
+              role="alert"
+            >
+              {loadError}
+            </p>
+          )}
+
           <section className="grid grid-cols-4 gap-[18px] max-[1024px]:grid-cols-2 max-[620px]:grid-cols-1 max-[620px]:gap-1">
             {metrics.map(([icon, title, value, note, tone, alert]) => (
               <article
@@ -41,18 +169,11 @@ function Dashboard() {
                     {icon}
                   </span>
                 </div>
-                <span
-                  className={`absolute right-[20px] top-[22px] text-[17px] max-[620px]:hidden ${alert ? "text-[#ff725f]" : "text-[#16bc56]"}`}
-                >
-                  <span className="material-symbols-outlined text-[22px]">
-                    north_east
-                  </span>
-                </span>
                 <p className="mb-0 mt-5 text-[11px] font-bold uppercase tracking-[.06em] text-[#858b90] max-[1024px]:mt-3 max-[620px]:mt-0 max-[620px]:text-[7px]">
                   {title}
                 </p>
                 <strong className="mt-px block text-[29px] font-extrabold leading-tight max-[1024px]:text-[23px] max-[620px]:text-[15px]">
-                  {value}
+                  {isLoading ? "—" : value}
                 </strong>
                 <small className="text-[10px] text-[#8e959b] max-[620px]:hidden">
                   {note}
@@ -91,56 +212,65 @@ function Dashboard() {
                   <span>Stock check</span>
                   <span>Open</span>
                 </div>
-                {jobs.length === 0 ? (
+                {isLoading ? (
                   <p className="px-5 py-8 text-center text-[12px] text-[#8d969e]">
-                    No scheduled jobs yet.
+                    Loading the board...
+                  </p>
+                ) : jobs.length === 0 ? (
+                  <p className="px-5 py-8 text-center text-[12px] text-[#8d969e]">
+                    No upcoming jobs are scheduled.
                   </p>
                 ) : (
-                  jobs.map((job, index) => (
-                    <div
-                      className={`${row} min-h-[62px] border-b border-[#e0e0e0] text-[10px] last:border-0 max-[1024px]:min-h-[56px] max-[1024px]:text-[8px] max-[1024px]:px-3 max-[620px]:mb-1 max-[620px]:min-h-[67px] max-[620px]:rounded-[6px] max-[620px]:border max-[620px]:px-3 max-[620px]:py-2 max-[620px]:[&>*:nth-child(4)]:hidden ${index === 3 ? "max-[620px]:hidden" : ""}`}
-                      role="row"
-                      key={`${job[0]}-${index}`}
-                    >
-                      <div>
-                        <strong className="text-[11px]">{job[0]}</strong>
-                        <em className="ml-[5px] rounded-[2px] bg-[#dbeafa] px-1 py-[3px] text-[8px] not-italic font-bold text-[#184f96]">
-                          {job[1]}
-                        </em>
-                        <small className="mt-1 block text-[9px] text-[#8d969e]">
-                          {job[2]}
-                        </small>
-                      </div>
-                      <div className="min-w-0">
-                        <strong className="block truncate">{job[3]}</strong>
-                        <small className="mt-1 block text-[9px] text-[#8d969e]">
-                          <span className="material-symbols-outlined align-middle text-[10px]">
-                            location_on
-                          </span>{" "}
-                          {job[4]}
-                        </small>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`grid h-7 w-7 place-items-center rounded-full text-[9px] font-bold text-white ${index === 1 ? "bg-[#17549e]" : "bg-[#e24f52]"}`}
-                        >
-                          {job[5]}
-                        </span>
-                        <span>{job[6]}</span>
-                        <b className="ml-1 rounded-[3px] bg-[#d9e8fa] px-[5px] py-1 text-[8px] text-[#15519c]">
-                          {job[7]}
-                        </b>
-                      </div>
-                      <span
-                        className={`w-max rounded-[9px] px-3 py-1.5 text-[8px] ${job[8] === "Available" ? "border border-[#8bdba2] bg-[#dff8e5] text-[#18823a]" : "border border-[#ff9f8f] bg-[#ffe0da] text-[#d75342]"}`}
+                  jobs.map((job, index) => {
+                    const stock = stockStatus(job.partsStatus);
+                    return (
+                      <div
+                        className={`${row} min-h-[62px] border-b border-[#e0e0e0] text-[10px] last:border-0 max-[1024px]:min-h-[56px] max-[1024px]:px-3 max-[1024px]:text-[8px] max-[620px]:mb-1 max-[620px]:min-h-[67px] max-[620px]:rounded-[6px] max-[620px]:border max-[620px]:px-3 max-[620px]:py-2 max-[620px]:[&>*:nth-child(4)]:hidden ${index === 3 ? "max-[620px]:hidden" : ""}`}
+                        role="row"
+                        key={`${job.jobNumber}-${index}`}
                       >
-                        ◎ {job[8]}
-                      </span>
-                      <span className="material-symbols-outlined text-[20px] text-[#15519c]">
-                        chevron_right
-                      </span>
-                    </div>
-                  ))
+                        <div>
+                          <strong className="text-[11px]">{job.time}</strong>
+                          <em className="ml-[5px] rounded-[2px] bg-[#dbeafa] px-1 py-[3px] text-[8px] not-italic font-bold text-[#184f96]">
+                            {job.jobNumber}
+                          </em>
+                          <small className="mt-1 block text-[9px] text-[#8d969e]">
+                            {job.serviceLabel} · {formatShortDate(job.scheduledDate)}
+                          </small>
+                        </div>
+                        <div className="min-w-0">
+                          <strong className="block truncate">
+                            {job.clientName}
+                          </strong>
+                          <small className="mt-1 block text-[9px] text-[#8d969e]">
+                            <span className="material-symbols-outlined align-middle text-[10px]">
+                              location_on
+                            </span>{" "}
+                            {job.siteAddress}
+                          </small>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="grid h-7 w-7 place-items-center rounded-full bg-[#17549e] text-[9px] font-bold text-white">
+                            {job.technicianInitials}
+                          </span>
+                          <span className="min-w-0 truncate">
+                            {job.technicianName}
+                          </span>
+                          <b className="ml-1 shrink-0 rounded-[3px] bg-[#d9e8fa] px-[5px] py-1 text-[8px] text-[#15519c]">
+                            {partsBadge(job.partsStatus)}
+                          </b>
+                        </div>
+                        <span
+                          className={`w-max rounded-[9px] px-3 py-1.5 text-[8px] ${stock === "Available" || stock === "Not needed" ? "border border-[#8bdba2] bg-[#dff8e5] text-[#18823a]" : "border border-[#ff9f8f] bg-[#ffe0da] text-[#d75342]"}`}
+                        >
+                          ◎ {stock}
+                        </span>
+                        <span className="material-symbols-outlined text-[20px] text-[#15519c]">
+                          chevron_right
+                        </span>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </section>
@@ -151,7 +281,7 @@ function Dashboard() {
                   <p className={`${label} max-[1024px]:text-[#dbeafa]`}>
                     Needs attention
                   </p>
-                  <h2 className="m-0 mt-1 text-[21px] font-bold max-[1024px]:text-white max-[1024px]:text-[13px]">
+                  <h2 className="m-0 mt-1 text-[21px] font-bold max-[1024px]:text-[13px] max-[1024px]:text-white">
                     Operation pulse
                   </h2>
                 </div>
@@ -162,53 +292,24 @@ function Dashboard() {
                 </span>
               </header>
               <div className="mt-[22px] max-[1024px]:mt-3">
-                {jobs.length === 0 ? (
-                  <p className="py-6 text-center text-[12px] text-[#8e959b]">
-                    No operational alerts yet.
-                  </p>
-                ) : (
-                  [
-                    [
-                      "warning",
-                      "text-[#ff725f]",
-                      "Parts below reorder point",
-                      "",
-                    ],
-                    [
-                      "assignment",
-                      "text-[#2467ae]",
-                      "Reports in review queue",
-                      "",
-                    ],
-                    [
-                      "account_balance",
-                      "text-[#063b7c]",
-                      "Outstanding invoices",
-                      "",
-                    ],
-                  ].map(([icon, color, title, note]) => (
-                    <a
-                      className="mb-3 flex min-h-[50px] items-center gap-2 rounded-[5px] border border-[#dbe0e5] bg-white p-2.5 text-[#063b7c] no-underline max-[1024px]:mb-2 max-[1024px]:min-h-[47px] max-[1024px]:p-2"
-                      href="#attention"
-                      key={title}
-                    >
-                      <span className={`w-5 text-center text-[13px] ${color}`}>
-                        <span className="material-symbols-outlined text-[18px]">
-                          {icon}
-                        </span>
+                {pulseItems.map(({ icon, color, title, note }) => (
+                  <div
+                    className="mb-3 flex min-h-[50px] items-center gap-2 rounded-[5px] border border-[#dbe0e5] bg-white p-2.5 text-[#063b7c] max-[1024px]:mb-2 max-[1024px]:min-h-[47px] max-[1024px]:p-2"
+                    key={title}
+                  >
+                    <span className={`w-5 text-center text-[13px] ${color}`}>
+                      <span className="material-symbols-outlined text-[18px]">
+                        {icon}
                       </span>
-                      <strong className="flex-1 text-[10px] max-[1024px]:text-[8px]">
-                        {title}
-                        <small className="mt-1 block text-[9px] font-normal text-[#8a929a] max-[1024px]:text-[7px]">
-                          {note}
-                        </small>
-                      </strong>
-                      <b className="material-symbols-outlined text-[17px] font-normal text-[#a6adb3]">
-                        chevron_right
-                      </b>
-                    </a>
-                  ))
-                )}
+                    </span>
+                    <strong className="flex-1 text-[10px] max-[1024px]:text-[8px]">
+                      {title}
+                      <small className="mt-1 block text-[9px] font-normal text-[#8a929a] max-[1024px]:text-[7px]">
+                        {note}
+                      </small>
+                    </strong>
+                  </div>
+                ))}
               </div>
               <div className="mt-5 border-t border-[#d2d9e0]" />
             </aside>

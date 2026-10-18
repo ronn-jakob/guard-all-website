@@ -43,21 +43,8 @@ function formatSelectedDate(date) {
   });
 }
 
-function getTechnicianRoleUsers(technicians) {
-  return technicians.filter((technician) => technician.roleName === "Technician");
-}
-
 // Sunday-first, matching the Calendar view's column order.
 const DAY_LABELS = ["S", "M", "T", "W", "TH", "F", "ST"];
-
-// Kept in sync with the public.job_type enum; the backend's jobTypeFor maps
-// these labels to installation / maintenance / inspection / repair.
-const SERVICE_TYPES = [
-  "Service call",
-  "Preventive maintenance",
-  "Installation",
-  "Inspection",
-];
 
 // Row shape shared by the schedule list and the selected-job panel.
 // Index order is load-bearing and must stay in sync with mapScheduleRow:
@@ -155,18 +142,9 @@ function DetailRow({ icon, label, children }) {
 
 function Scheduling() {
   const [selectedOrder, setSelectedOrder] = useState("");
-  const [isCreateJobOpen, setIsCreateJobOpen] = useState(false);
-  const [isEditJobOpen, setIsEditJobOpen] = useState(false);
-  const [editValues, setEditValues] = useState({});
-  const [editTechnicians, setEditTechnicians] = useState([""]);
-  const [editTechnicianOptions, setEditTechnicianOptions] = useState([]);
-  const [clientType, setClientType] = useState("Individual");
-  const [technicians, setTechnicians] = useState([""]);
-  const [technicianOptions, setTechnicianOptions] = useState([]);
   const [schedule, setSchedule] = useState([]);
   const [scheduledJobDates, setScheduledJobDates] = useState({});
   const [formError, setFormError] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
   const sessionUser = getSession()?.user;
   const confirmedAssignmentsKey = `confirmed-schedule-assignments:${sessionUser?.id ?? "unknown"}`;
   const [confirmedAssignments, setConfirmedAssignments] = useState(() => {
@@ -179,8 +157,6 @@ function Scheduling() {
       return new Set();
     }
   });
-  const defaultBranch =
-    getSession()?.user?.branch === "cebu" ? "Cebu" : "Makati";
   const navigate = useNavigate();
   // State to manage active view mode ('list' | 'calendar')
   const [viewMode, setViewMode] = useState("list");
@@ -209,44 +185,6 @@ function Scheduling() {
       isMounted = false;
     };
   }, [confirmedAssignmentsKey]);
-
-  useEffect(() => {
-    let isMounted = true;
-    callAuthFunction("list-technicians", {
-      date: getDateKey(selectedCalendarDate),
-    })
-      .then(({ technicians: availableTechnicians }) => {
-        if (isMounted) {
-          setTechnicianOptions(getTechnicianRoleUsers(availableTechnicians || []));
-        }
-      })
-      .catch((error) => {
-        if (isMounted) setFormError(error.message);
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, [selectedCalendarDate]);
-
-  useEffect(() => {
-    if (!isEditJobOpen || !editValues.date) return;
-    let isMounted = true;
-    callAuthFunction("list-technicians", {
-      date: editValues.date,
-      excludeOrder: editValues.order,
-    })
-      .then(({ technicians: availableTechnicians }) => {
-        if (isMounted) {
-          setEditTechnicianOptions(getTechnicianRoleUsers(availableTechnicians || []));
-        }
-      })
-      .catch((error) => {
-        if (isMounted) setFormError(error.message);
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, [isEditJobOpen, editValues.date, editValues.order]);
 
   // Weekly list range: the Sunday-Saturday week containing the anchored date.
   const weekStart = new Date(
@@ -346,6 +284,19 @@ function Scheduling() {
     }
   }
 
+  // The create form opens on the day the scheduler is looking at, so clicking a
+  // calendar day or a list day chip carries straight through to it. This is only
+  // a starting value — the date stays editable on the form.
+  const selectedCalendarKey = getDateKey(selectedCalendarDate);
+  const selectedDayInWeek =
+    selectedCalendarKey >= getDateKey(weekStart) &&
+    selectedCalendarKey <= getDateKey(weekEnd);
+  const createDateKey =
+    viewMode === "calendar"
+      ? selectedCalendarKey
+      : (dayFilter ??
+        (selectedDayInWeek ? selectedCalendarKey : getDateKey(getToday())));
+
   const defaultVisibleJob =
     viewMode === "calendar" ? selectedDayJobs[0] : listJobs[0];
   const selectedJob = schedule.find((job) => job[3] === selectedOrder) ??
@@ -414,105 +365,6 @@ function Scheduling() {
     navigate(`/inventory/allocate?job=${encodeURIComponent(order)}`);
   }
 
-  async function handleCreateJob(event) {
-    event.preventDefault();
-    setFormError("");
-    setIsSaving(true);
-    const formData = new FormData(event.currentTarget);
-    try {
-      await callAuthFunction("create-schedule", {
-        firstName: formData.get("firstName"),
-        lastName: formData.get("lastName"),
-        clientType: formData.get("clientType"),
-        companyName: formData.get("companyName"),
-        address: formData.get("address"),
-        contactEmail: formData.get("contactEmail"),
-        phoneNumber: formData.get("phoneNumber"),
-        serviceType: formData.get("serviceType"),
-        date: formData.get("date"),
-        startTime: formData.get("startTime"),
-        endTime: formData.get("endTime"),
-        branch: formData.get("branch"),
-        technicianIds: formData.getAll("technicians").filter(Boolean),
-      });
-      const { schedules } = await callAuthFunction("list-schedules");
-      const nextDates = Object.fromEntries(
-        (schedules || []).map((job) => [
-          job.order,
-          new Date(`${job.date}T00:00:00`),
-        ]),
-      );
-      setSchedule((schedules || []).map(mapScheduleRow));
-      setScheduledJobDates(nextDates);
-      setTechnicians([""]);
-      setIsCreateJobOpen(false);
-    } catch (error) {
-      setFormError(error.message);
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
-  function openEditJob() {
-    const startTime = selectedJob[0] || "09:00";
-    const [hours, minutes] = startTime.split(":").map(Number);
-    const endDate = new Date(2026, 0, 1, hours + 1, minutes);
-    setEditValues({
-      order: selectedJob[3],
-      serviceType: SERVICE_TYPES.includes(selectedJob[4])
-        ? selectedJob[4]
-        : "Service call",
-      date: getDateKey(
-        scheduledJobDates[selectedJob[3]] || selectedCalendarDate,
-      ),
-      startTime,
-      endTime: `${String(endDate.getHours()).padStart(2, "0")}:${String(endDate.getMinutes()).padStart(2, "0")}`,
-      branch: selectedJob[10]
-        ? capitalizeFirst(selectedJob[10])
-        : defaultBranch,
-    });
-    setEditTechnicians(
-      selectedJob[8]?.length
-        ? selectedJob[8].map((technician) => technician.id)
-        : [""],
-    );
-    setFormError("");
-    setIsEditJobOpen(true);
-  }
-
-  async function handleEditJob(event) {
-    event.preventDefault();
-    setFormError("");
-    setIsSaving(true);
-    const formData = new FormData(event.currentTarget);
-    try {
-      await callAuthFunction("update-schedule", {
-        order: formData.get("order"),
-        serviceType: formData.get("serviceType"),
-        date: formData.get("date"),
-        startTime: formData.get("startTime"),
-        endTime: formData.get("endTime"),
-        branch: formData.get("branch"),
-        technicianIds: formData.getAll("technicians").filter(Boolean),
-      });
-      const { schedules } = await callAuthFunction("list-schedules");
-      const nextDates = Object.fromEntries(
-        (schedules || []).map((job) => [
-          job.order,
-          new Date(`${job.date}T00:00:00`),
-        ]),
-      );
-      setSchedule((schedules || []).map(mapScheduleRow));
-      setScheduledJobDates(nextDates);
-      setSelectedCalendarDate(new Date(`${formData.get("date")}T00:00:00`));
-      setIsEditJobOpen(false);
-    } catch (error) {
-      setFormError(error.message);
-    } finally {
-      setIsSaving(false);
-    }
-  }
-
   return (
     <main className="flex h-screen overflow-hidden bg-[#202123] font-sans text-[#174f9a] max-[1024px]:block">
       <Sidebar />
@@ -535,13 +387,22 @@ function Scheduling() {
             <div className="flex items-center gap-6 max-[620px]:self-end">
               <button
                 type="button"
-                onClick={() => setIsCreateJobOpen(true)}
+                onClick={() => navigate(`/scheduling/new?date=${createDateKey}`)}
                 className="rounded-[6px] bg-[#1250a0] px-5 py-3 text-[12px] font-bold text-white shadow-[0_2px_4px_rgb(18_80_160_/_25%)] max-[1024px]:px-4 max-[1024px]:py-2 max-[620px]:text-[9px]"
               >
                 + Create Job
               </button>
             </div>
           </div>
+
+          {formError && (
+            <p
+              className="mb-4 rounded-[6px] border border-[#f1b7af] bg-[#fff3f1] px-4 py-3 text-[12px] text-[#a83a2c]"
+              role="alert"
+            >
+              {formError}
+            </p>
+          )}
 
           <div className="grid grid-cols-[minmax(0,2fr)_minmax(300px,1fr)] gap-[18px] max-[620px]:grid-cols-1">
             <section className="flex flex-col overflow-hidden rounded-[12px] border border-[#dfe6ec] bg-white shadow-[0_3px_8px_rgb(31_59_82_/_14%)]">
@@ -919,7 +780,9 @@ function Scheduling() {
                   {jobOrder && (
                     <button
                       type="button"
-                      onClick={openEditJob}
+                      onClick={() =>
+                        navigate(`/scheduling/${encodeURIComponent(jobOrder)}/edit`)
+                      }
                       className="grid h-8 w-8 place-items-center rounded-[6px] bg-white text-[#174f9a] shadow-sm hover:bg-[#eaf2fc]"
                       aria-label="Edit selected work order"
                       title="Edit selected work order"
@@ -1016,537 +879,6 @@ function Scheduling() {
         </div>
       </section>
 
-      {isEditJobOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#071426]/75 p-4 backdrop-blur-[2px]"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setIsEditJobOpen(false);
-          }}
-        >
-          <section
-            role="dialog"
-            aria-labelledby="edit-job-title"
-            className="w-full max-w-[560px] rounded-[14px] border border-[#263c5a] bg-[#172a44] p-6 text-[#e5edf8] shadow-[0_24px_80px_rgb(0_0_0_/_45%)]"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="m-0 text-[11px] font-semibold uppercase tracking-[.1em] text-[#91a8c7]">
-                  {editValues.order}
-                </p>
-                <h2
-                  id="edit-job-title"
-                  className="m-0 mt-1 text-[23px] font-bold text-white"
-                >
-                  Edit scheduled job
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsEditJobOpen(false)}
-                className="grid h-8 w-8 place-items-center text-[25px] text-[#91a8c7] hover:text-white"
-              >
-                ×
-              </button>
-            </div>
-            <form className="mt-5 grid gap-4" onSubmit={handleEditJob}>
-              <input
-                type="hidden"
-                name="order"
-                value={editValues.order || ""}
-                readOnly
-              />
-              <label className="text-[13px] font-medium text-[#a9bfd9]">
-                Service type
-                <select
-                  name="serviceType"
-                  value={editValues.serviceType || ""}
-                  onChange={(event) =>
-                    setEditValues((current) => ({
-                      ...current,
-                      serviceType: event.target.value,
-                    }))
-                  }
-                  className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
-                >
-                  {SERVICE_TYPES.map((type) => (
-                    <option key={type}>{type}</option>
-                  ))}
-                </select>
-              </label>
-              <div className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
-                <label className="text-[13px] font-medium text-[#a9bfd9]">
-                  Date
-                  <input
-                    required
-                    type="date"
-                    name="date"
-                    value={editValues.date || ""}
-                    onChange={(event) =>
-                      setEditValues((current) => ({
-                        ...current,
-                        date: event.target.value,
-                      }))
-                    }
-                    className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
-                  />
-                </label>
-                <label className="text-[13px] font-medium text-[#a9bfd9]">
-                  Branch
-                  <select
-                    name="branch"
-                    value={editValues.branch || defaultBranch}
-                    onChange={(event) =>
-                      setEditValues((current) => ({
-                        ...current,
-                        branch: event.target.value,
-                      }))
-                    }
-                    className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
-                  >
-                    <option>Makati</option>
-                    <option>Cebu</option>
-                  </select>
-                </label>
-              </div>
-              <div className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
-                <label className="text-[13px] font-medium text-[#a9bfd9]">
-                  Start time
-                  <input
-                    required
-                    type="time"
-                    name="startTime"
-                    value={editValues.startTime || ""}
-                    onChange={(event) =>
-                      setEditValues((current) => ({
-                        ...current,
-                        startTime: event.target.value,
-                      }))
-                    }
-                    className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
-                  />
-                </label>
-                <label className="text-[13px] font-medium text-[#a9bfd9]">
-                  End time
-                  <input
-                    required
-                    type="time"
-                    name="endTime"
-                    value={editValues.endTime || ""}
-                    onChange={(event) =>
-                      setEditValues((current) => ({
-                        ...current,
-                        endTime: event.target.value,
-                      }))
-                    }
-                    className="mt-1.5 h-11 w-full rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
-                  />
-                </label>
-              </div>
-              <fieldset className="border-0 p-0">
-                <div className="flex items-center justify-between gap-3">
-                  <legend className="text-[13px] font-medium text-[#a9bfd9]">
-                    Assign technicians
-                  </legend>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setEditTechnicians((current) => [...current, ""])
-                    }
-                    className="rounded-[6px] border border-[#4d88e8] px-3 py-2 text-[11px] font-semibold text-[#9fc4ff] hover:bg-[#1d3351]"
-                  >
-                    + Add technician
-                  </button>
-                </div>
-                <div className="mt-2 grid gap-2">
-                  {editTechnicians.map((technicianId, index) => {
-                    return (
-                      <div
-                        className="flex items-center gap-2"
-                        key={`edit-technician-${index}`}
-                      >
-                        <select
-                          name="technicians"
-                          value={technicianId}
-                          onChange={(event) =>
-                            setEditTechnicians((current) =>
-                              current.map((value, currentIndex) =>
-                                currentIndex === index
-                                  ? event.target.value
-                                  : value,
-                              ),
-                            )
-                          }
-                          className="h-11 min-w-0 flex-1 rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-3 text-[14px] text-white outline-none focus:border-[#4d88e8]"
-                        >
-                          <option value="" disabled>Select a technician</option>
-                          {editTechnicianOptions.map((option) => (
-                            <option key={option.id} value={option.id}>
-                              {option.name}
-                            </option>
-                          ))}
-                        </select>
-                        {editTechnicians.length > 1 && (
-                          <button
-                            type="button"
-                            aria-label={`Remove technician ${index + 1}`}
-                            onClick={() =>
-                              setEditTechnicians((current) =>
-                                current.filter(
-                                  (_, currentIndex) => currentIndex !== index,
-                                ),
-                              )
-                            }
-                            className="grid h-10 w-10 flex-none place-items-center rounded-[6px] text-[#91a8c7] hover:bg-[#1d3351] hover:text-white"
-                          >
-                            <span className="material-symbols-outlined text-[20px]">
-                              delete
-                            </span>
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </fieldset>
-              {formError && (
-                <p
-                  className="m-0 rounded-[6px] border border-[#8f3e3a] bg-[#3c2229] px-3 py-2 text-[12px] text-[#ffb3a8]"
-                  role="alert"
-                >
-                  {formError}
-                </p>
-              )}
-              <div className="flex justify-end gap-3 border-t border-[#293d58] pt-4">
-                <button
-                  type="button"
-                  onClick={() => setIsEditJobOpen(false)}
-                  className="rounded-[8px] border border-[#293f5d] px-4 py-2 text-[13px] text-[#e5edf8] hover:bg-[#1d3351]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSaving}
-                  className="rounded-[8px] bg-[#4d88e8] px-4 py-2 text-[13px] font-semibold text-white hover:bg-[#5b96f4]"
-                >
-                  {isSaving ? "Saving..." : "Save changes"}
-                </button>
-              </div>
-            </form>
-          </section>
-        </div>
-      )}
-
-      {isCreateJobOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#071426]/75 p-4 backdrop-blur-[2px] max-[620px]:items-end max-[620px]:p-0"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setIsCreateJobOpen(false);
-          }}
-        >
-          <section
-            role="dialog"
-            className="flex max-h-[92vh] w-full max-w-[890px] flex-col overflow-hidden rounded-[17px] border border-[#263c5a] bg-[#172a44] text-[#e5edf8] shadow-[0_24px_80px_rgb(0_0_0_/_45%)] max-[620px]:max-h-[94vh] max-[620px]:rounded-b-none max-[620px]:rounded-t-[16px]"
-          >
-            <header className="flex shrink-0 items-start justify-between border-b border-[#293d58] px-7 py-5 max-[620px]:px-5 max-[620px]:py-4">
-              <div>
-                <p className="m-0 text-[12px] font-semibold uppercase tracking-[.1em] text-[#91a8c7]">
-                  Operations / Jobs
-                </p>
-                <h2
-                  id="create-job-title"
-                  className="m-0 mt-1 text-[27px] font-bold text-[white] max-[620px]:text-[23px]"
-                >
-                  Create Job
-                </h2>
-                <p className="m-0 mt-1 text-[15px] text-[#9aafc9]">
-                  Put the right technician and parts on every site visit.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsCreateJobOpen(false)}
-                className="grid h-8 w-8 place-items-center text-[27px] leading-none text-[#91a8c7] hover:text-white"
-              >
-                ×
-              </button>
-            </header>
-
-            <form
-              id="create-job-form"
-              className="min-h-0 flex-1 overflow-y-auto px-7 py-5 max-[620px]:px-5"
-              onSubmit={handleCreateJob}
-            >
-              <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
-                <label className="text-[14px] font-medium text-[#a9bfd9]">
-                  First name <span className="text-[#ff6557]">*</span>
-                  <input
-                    required
-                    name="firstName"
-                    placeholder="First name"
-                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
-                  />
-                </label>
-                <label className="text-[14px] font-medium text-[#a9bfd9]">
-                  Last name <span className="text-[#ff6557]">*</span>
-                  <input
-                    required
-                    name="lastName"
-                    placeholder="Last name"
-                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
-                  />
-                </label>
-              </div>
-
-              <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
-                <label className="text-[14px] font-medium text-[#a9bfd9]">
-                  Client Type <span className="text-[#ff6557]">*</span>
-                  <select
-                    required
-                    name="clientType"
-                    value={clientType}
-                    onChange={(event) => setClientType(event.target.value)}
-                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
-                  >
-                    <option>Individual</option>
-                    <option>Company</option>
-                  </select>
-                </label>
-                <label className="text-[14px] font-medium text-[#a9bfd9]">
-                  Company Name
-                  <input
-                    name="companyName"
-                    disabled={clientType !== "Company"}
-                    required={clientType === "Company"}
-                    placeholder="Company name"
-                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8] disabled:cursor-not-allowed disabled:opacity-45"
-                  />
-                </label>
-              </div>
-
-              <label className="mb-4 block text-[14px] font-medium text-[#a9bfd9]">
-                Address <span className="text-[#ff6557]">*</span>
-                <input
-                  required
-                  autoFocus
-                  name="address"
-                  placeholder="Site or client address"
-                  className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
-                />
-              </label>
-
-              <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
-                <label className="text-[14px] font-medium text-[#a9bfd9]">
-                  Contact email <span className="text-[#ff6557]">*</span>
-                  <input
-                    required
-                    name="contactEmail"
-                    type="email"
-                    placeholder="name@example.com"
-                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
-                  />
-                </label>
-                <label className="text-[14px] font-medium text-[#a9bfd9]">
-                  Phone number <span className="text-[#ff6557]">*</span>
-                  <input
-                    required
-                    name="phoneNumber"
-                    type="tel"
-                    placeholder="09XX XXX XXXX"
-                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
-                  />
-                </label>
-              </div>
-
-              <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
-                <label className="col-span-2 text-[14px] font-medium text-[#a9bfd9] max-[620px]:col-span-1">
-                  Service type <span className="text-[#ff6557]">*</span>
-                  <select
-                    name="serviceType"
-                    defaultValue="Service call"
-                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
-                  >
-                    {SERVICE_TYPES.map((type) => (
-                      <option key={type}>{type}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:gap-3">
-                <label className="text-[14px] font-medium text-[#a9bfd9]">
-                  Date <span className="text-[#ff6557]">*</span>
-                  <input
-                    required
-                    type="date"
-                    name="date"
-                    value={getDateKey(selectedCalendarDate)}
-                    readOnly
-                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
-                  />
-                </label>
-                <label className="text-[14px] font-medium text-[#a9bfd9]">
-                  Start time <span className="text-[#ff6557]">*</span>
-                  <input
-                    required
-                    type="time"
-                    name="startTime"
-                    defaultValue="09:00"
-                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
-                  />
-                </label>
-              </div>
-
-              <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
-                <label className="text-[14px] font-medium text-[#a9bfd9]">
-                  End time <span className="text-[#ff6557]">*</span>
-                  <input
-                    required
-                    type="time"
-                    name="endTime"
-                    defaultValue="10:00"
-                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
-                  />
-                </label>
-                <label className="text-[14px] font-medium text-[#a9bfd9]">
-                  Branch <span className="text-[#ff6557]">*</span>
-                  <select
-                    required
-                    name="branch"
-                    defaultValue={defaultBranch}
-                    className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
-                  >
-                    <option>Makati</option>
-                    <option>Cebu</option>
-                  </select>
-                </label>
-              </div>
-
-              <fieldset className="border-0 p-0">
-                <div className="flex items-center justify-between gap-3">
-                  <legend className="text-[14px] font-medium text-[#a9bfd9]">
-                    Assign technicians{" "}
-                    <span className="text-[12px] text-[#7188a4]">
-                      (optional)
-                    </span>
-                  </legend>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setTechnicians((current) => [...current, ""])
-                    }
-                    className="rounded-[8px] border border-[#4d88e8] px-3 py-2 text-[12px] font-semibold text-[#9fc4ff] hover:bg-[#1d3351]"
-                  >
-                    + Add technician
-                  </button>
-                </div>
-
-                <div className="mt-2 grid gap-2">
-                  {technicians.map((technician, index) => (
-                    <div
-                      className="flex items-center gap-2"
-                      key={`technician-${index}`}
-                    >
-                      <select
-                        name="technicians"
-                        value={technician}
-                        onChange={(event) =>
-                          setTechnicians((current) =>
-                            current.map((value, currentIndex) =>
-                              currentIndex === index
-                                ? event.target.value
-                                : value,
-                            ),
-                          )
-                        }
-                        className="h-12 min-w-0 flex-1 rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
-                      >
-                        <option value="" disabled>Select a technician</option>
-                        {technicianOptions.map((option) => (
-                          <option key={option.id} value={option.id}>
-                            {option.name}
-                          </option>
-                        ))}
-                      </select>
-                      {technicians.length > 1 && (
-                        <button
-                          type="button"
-                          aria-label={`Remove technician ${index + 1}`}
-                          onClick={() =>
-                            setTechnicians((current) =>
-                              current.filter(
-                                (_, currentIndex) => currentIndex !== index,
-                              ),
-                            )
-                          }
-                          className="grid h-10 w-10 flex-none place-items-center rounded-[8px] text-[#91a8c7] hover:bg-[#1d3351] hover:text-white"
-                        >
-                          <span className="material-symbols-outlined text-[20px]">
-                            delete
-                          </span>
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </fieldset>
-              {formError && (
-                <p
-                  className="mb-5 mt-3 rounded-[6px] border border-[#8f3e3a] bg-[#3c2229] px-3 py-2 text-[12px] text-[#ffb3a8]"
-                  role="alert"
-                >
-                  {formError}
-                </p>
-              )}
-              <p className="mb-5 mt-2 flex items-center gap-2 text-[14px] text-[#27a567]">
-                <span className="h-2.5 w-2.5 rounded-full bg-[#27a567]" />
-                {technicianOptions.length
-                  ? `${technicianOptions.length} technician${technicianOptions.length === 1 ? "" : "s"} available on this date`
-                  : "No technicians available on this date"}
-              </p>
-
-              <label className="mt-4 block text-[14px] font-medium text-[#a9bfd9]">
-                Notes for technician
-                <textarea
-                  rows="3"
-                  placeholder="Access instructions, contact person, issue description..."
-                  className="mt-1.5 w-full resize-y rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 py-3 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
-                />
-              </label>
-            </form>
-
-            <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-[#293d58] bg-[#172a44] px-7 py-4 max-[620px]:flex-col max-[620px]:items-stretch max-[620px]:px-5">
-              <span className="text-[14px] text-[#91a8c7]">
-                Work order number generated on save
-              </span>
-              <div className="flex gap-3 max-[420px]:flex-wrap">
-                <button
-                  type="button"
-                  onClick={() => setIsCreateJobOpen(false)}
-                  className="h-[50px] rounded-[10px] border border-[#293f5d] px-5 text-[14px] text-[#e5edf8] hover:bg-[#1d3351]"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsCreateJobOpen(false)}
-                  className="h-[50px] rounded-[10px] border border-[#293f5d] px-5 text-[14px] text-[#e5edf8] hover:bg-[#1d3351]"
-                >
-                  Save draft
-                </button>
-                <button
-                  type="submit"
-                  form="create-job-form"
-                  disabled={isSaving}
-                  className="h-[50px] rounded-[10px] bg-[#4d88e8] px-5 text-[14px] font-semibold text-white hover:bg-[#5b96f4] max-[420px]:flex-1"
-                >
-                  {isSaving ? "Saving..." : "Create job"}
-                </button>
-              </div>
-            </footer>
-          </section>
-        </div>
-      )}
     </main>
   );
 }

@@ -2,7 +2,10 @@ import Dashboard from "./components/Dashboard.jsx";
 import Inventory from "./components/Inventory.jsx";
 import Login from "./components/Login.jsx";
 import Scheduling from "./components/Scheduling.jsx";
+import JobFormPage from "./components/JobFormPage.jsx";
 import SalesBilling from "./components/SalesBilling.jsx";
+import InvoiceFormPage from "./components/InvoiceFormPage.jsx";
+import JobTemplates from "./components/JobTemplates.jsx";
 import FieldReports from "./components/FieldReports.jsx";
 import ReportsOverview from "./components/ReportsOverview.jsx";
 import Account from "./components/Account.jsx";
@@ -37,9 +40,13 @@ function App() {
       <Route path="/" element={<Login />} />
       <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
       <Route path="/scheduling" element={<ProtectedRoute module="scheduling"><Scheduling /></ProtectedRoute>} />
+      <Route path="/scheduling/new" element={<ProtectedRoute module="scheduling"><JobFormPage /></ProtectedRoute>} />
+      <Route path="/scheduling/:order/edit" element={<ProtectedRoute module="scheduling"><JobFormPage /></ProtectedRoute>} />
       <Route path="/inventory" element={<ProtectedRoute module="inventory"><Inventory /></ProtectedRoute>} />
       <Route path="/inventory/allocate" element={<ProtectedRoute anyModule={["scheduling", "inventory"]}><Inventory /></ProtectedRoute>} />
       <Route path="/billing" element={<ProtectedRoute module="sales_billing"><SalesBilling /></ProtectedRoute>} />
+      <Route path="/billing/new" element={<ProtectedRoute module="sales_billing"><InvoiceFormPage /></ProtectedRoute>} />
+      <Route path="/templates" element={<ProtectedRoute module="sales_billing"><JobTemplates /></ProtectedRoute>} />
       <Route path="/reports" element={<ProtectedRoute disallowRole="Technician" module="field_reporting"><ReportsOverview /></ProtectedRoute>} />
       <Route path="/reports/new" element={<ProtectedRoute module="field_reporting"><FieldReports /></ProtectedRoute>} />
       <Route path="/account" element={<ProtectedRoute module="admin"><Account /></ProtectedRoute>} />

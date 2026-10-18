@@ -111,6 +111,30 @@ function ReportsOverview() {
     queueFilters.find((option) => option.value === queueFilter)?.label ??
     "All items";
 
+  // Submitted reports are grouped by job so a multi-technician job reads as one
+  // collection. Pending-report rows are already job-level and stand alone.
+  const reportsPerJob = new Map();
+  reports.forEach((report) => {
+    if (!report.jobId || report.isPendingReport) return;
+    reportsPerJob.set(report.jobId, (reportsPerJob.get(report.jobId) ?? 0) + 1);
+  });
+  const queueRows = [];
+  const announcedJobs = new Set();
+  filteredQueue.forEach((report) => {
+    const groupSize = report.jobId ? (reportsPerJob.get(report.jobId) ?? 0) : 0;
+    if (groupSize > 1 && !announcedJobs.has(report.jobId)) {
+      announcedJobs.add(report.jobId);
+      queueRows.push({
+        type: "header",
+        key: `header-${report.jobId}`,
+        jobNumber: report.jobNumber || "Job",
+        reported: groupSize,
+        assigned: Math.max(report.jobTechnicianCount || 0, groupSize),
+      });
+    }
+    queueRows.push({ type: "report", key: report.id, report });
+  });
+
   // Keep the open report inside the filtered set, so the detail pane can never
   // show something that the list is currently hiding.
   const selectedReport =
@@ -289,35 +313,49 @@ function ReportsOverview() {
                     </button>
                   </div>
                 ) : (
-                  filteredQueue.map((report) => (
-                    <button
-                      className={`block w-full border-b border-[#e1e6eb] px-5 py-4 text-left last:border-b-0 transition-colors hover:bg-[#f4f8ff] ${report.id === selectedReportId ? "border-l-4 border-l-[#286fc7] bg-[#eef4ff]" : ""}`}
-                      key={report.id}
-                      type="button"
-                      onClick={() => setSelectedReportId(report.id)}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <strong className="text-[11px] font-bold text-[#35649a]">
-                          {report.id}
-                        </strong>
-                        <StatusPill tone={report.tone}>
-                          {report.status}
-                        </StatusPill>
-                      </div>
-                      <h3 className="m-0 mt-3 truncate text-[15px] font-bold text-[#174276]">
-                        {report.client}
-                      </h3>
-                      <p className="m-0 mt-1 truncate text-[12px] text-[#7d8994]">
-                        {report.service}
-                      </p>
-                      <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-[#8b949c]">
-                        <span className="min-w-0 truncate">
-                          {report.technician}
+                  queueRows.map((row) =>
+                    row.type === "header" ? (
+                      <div
+                        key={row.key}
+                        className="flex items-center justify-between gap-2 border-b border-[#e1e6eb] bg-[#f4f8ff] px-5 py-2 text-[10px] font-bold uppercase tracking-[.06em] text-[#607286]"
+                      >
+                        <span className="truncate">
+                          {row.jobNumber} · technician reports
                         </span>
-                        <span className="shrink-0">{report.time}</span>
+                        <span className="shrink-0 text-[#174f9a]">
+                          {row.reported} of {row.assigned} reported
+                        </span>
                       </div>
-                    </button>
-                  ))
+                    ) : (
+                      <button
+                        className={`block w-full border-b border-[#e1e6eb] px-5 py-4 text-left last:border-b-0 transition-colors hover:bg-[#f4f8ff] ${row.report.id === selectedReportId ? "border-l-4 border-l-[#286fc7] bg-[#eef4ff]" : ""}`}
+                        key={row.key}
+                        type="button"
+                        onClick={() => setSelectedReportId(row.report.id)}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <strong className="text-[11px] font-bold text-[#35649a]">
+                            {row.report.id}
+                          </strong>
+                          <StatusPill tone={row.report.tone}>
+                            {row.report.status}
+                          </StatusPill>
+                        </div>
+                        <h3 className="m-0 mt-3 truncate text-[15px] font-bold text-[#174276]">
+                          {row.report.client}
+                        </h3>
+                        <p className="m-0 mt-1 truncate text-[12px] text-[#7d8994]">
+                          {row.report.service}
+                        </p>
+                        <div className="mt-3 flex items-center justify-between gap-2 text-[11px] text-[#8b949c]">
+                          <span className="min-w-0 truncate">
+                            {row.report.technician}
+                          </span>
+                          <span className="shrink-0">{row.report.time}</span>
+                        </div>
+                      </button>
+                    ),
+                  )
                 )}
               </div>
             </section>

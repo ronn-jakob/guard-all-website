@@ -3,6 +3,11 @@ import TopBar from "./TopBar.jsx";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { callAuthFunction, getSession } from "../lib/auth.js";
+import { supabase } from "../lib/supabaseClient.js";
+
+const ATTACHMENT_BUCKET = "report-attachments";
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_ATTACHMENTS = 5;
 
 const input =
   "mt-1 h-10 w-full rounded-[5px] border border-[#cbd8e7] bg-[#eef4ff] px-3 text-[14px] text-[#4d6075] outline-none";
@@ -16,6 +21,41 @@ const reportStatusStyles = {
   green: "border-[#73c481] bg-[#e1f6e4] text-[#388b47]",
   yellow: "border-[#e8cc70] bg-[#fdf5dd] text-[#8a6d1a]",
 };
+
+// Phone photos routinely exceed the bucket limit, so shrink them before upload.
+// Anything unexpected (no canvas, no createImageBitmap, a bigger result) falls back
+// to the original file, and EXIF orientation is honoured so photos are not sideways.
+async function prepareImageForUpload(file) {
+  if (!file.type.startsWith("image/")) return file;
+  try {
+    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+    const maxEdge = 2000;
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && file.size <= 1_500_000) {
+      bitmap.close?.();
+      return file;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) {
+      bitmap.close?.();
+      return file;
+    }
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+    const blob = await new Promise((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", 0.82),
+    );
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], `${file.name.replace(/\.[^.]+$/, "")}.jpg`, {
+      type: "image/jpeg",
+    });
+  } catch {
+    return file;
+  }
+}
 
 function ReportField({ fieldLabel, value }) {
   return (
@@ -68,6 +108,21 @@ function FieldReports() {
   const [isLoadingSubmittedReports, setIsLoadingSubmittedReports] =
     useState(true);
   const [submittedReportsError, setSubmittedReportsError] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
+  const [editReport, setEditReport] = useState(null);
+  const [editValues, setEditValues] = useState({
+    serviceDate: "",
+    arrivalTime: "",
+    workPerformed: "",
+    issueDescription: "",
+    recommendations: "",
+    additionalNotes: "",
+    siteAddress: "",
+    clientSignoff: false,
+    clientSignoffName: "",
+  });
+  const [isResubmitting, setIsResubmitting] = useState(false);
+  const [resubmitError, setResubmitError] = useState("");
   const [openReport, setOpenReport] = useState(null);
 
   useEffect(() => {
@@ -98,7 +153,7 @@ function FieldReports() {
     return () => {
       isMounted = false;
     };
-  }, [technicianFilter]);
+  }, [technicianFilter, reloadToken]);
 
   useEffect(() => {
     let isMounted = true;
@@ -121,6 +176,9 @@ function FieldReports() {
   }, [requestedJobNumber]);
 
   function selectJob(job) {
+    // Read the name inside the handler so this function owns no component state;
+    // otherwise the auto-select effect would need it as a dependency.
+    const currentName = getSession()?.user?.name || "";
     setSelectedJob(job);
     setSubmitError("");
     setAttachedImages([]);
@@ -138,7 +196,8 @@ function FieldReports() {
       jobNumber: job.jobNumber,
       serviceType: job.serviceType,
       siteAddress: job.siteAddress,
-      technicianName: job.technicianName,
+      technicianName:
+        currentName || job.assignedTechnicians?.[0]?.name || job.technicianName,
       serviceDate: job.serviceDate,
       arrivalTime: job.arrivalTime,
     }));
@@ -155,39 +214,136 @@ function FieldReports() {
     }));
   }
 
-  function handleImageSelection(event) {
+  async function handleImageSelection(event) {
     const files = Array.from(event.target.files ?? []);
-    if (!files.length) return;
+    event.target.value = "";
+    if (!files.length || !selectedJob) return;
 
-    Promise.all(
-      files.map(
-        (file) =>
-          new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              resolve({
-                id: `${file.name}-${file.lastModified}-${Math.random().toString(16).slice(2)}`,
-                name: file.name,
-                type: file.type,
-                dataUrl: String(reader.result || ""),
-              });
-            };
-            reader.onerror = () => resolve(null);
-            reader.readAsDataURL(file);
-          }),
-      ),
-    ).then((imageEntries) => {
-      const validImages = imageEntries.filter(Boolean).slice(0, 5);
-      setAttachedImages((currentImages) =>
-        [...currentImages, ...validImages].slice(0, 5),
+    const room = MAX_ATTACHMENTS - attachedImages.length;
+    if (room <= 0) {
+      setSubmitError(`Attach at most ${MAX_ATTACHMENTS} images.`);
+      return;
+    }
+
+    setSubmitError("");
+    for (const file of files.slice(0, room)) {
+      if (!file.type.startsWith("image/")) {
+        setSubmitError(`${file.name} is not an image.`);
+        continue;
+      }
+
+      const id = `${file.name}-${file.lastModified}-${Math.random().toString(16).slice(2)}`;
+      setAttachedImages((current) => [
+        ...current,
+        {
+          id,
+          name: file.name,
+          previewUrl: URL.createObjectURL(file),
+          path: "",
+          status: "uploading",
+          error: "",
+        },
+      ]);
+
+      try {
+        const prepared = await prepareImageForUpload(file);
+        if (prepared.size > MAX_ATTACHMENT_BYTES) {
+          throw new Error("Each image must be 10 MB or smaller.");
+        }
+        // The bucket is private: ask the Edge Function for a one-off signed
+        // upload URL, then put the file straight into storage.
+        const { path, token } = await callAuthFunction("create-report-upload", {
+          jobId: selectedJob.jobId,
+          fileName: prepared.name,
+          contentType: prepared.type,
+          size: prepared.size,
+        });
+        const { error } = await supabase.storage
+          .from(ATTACHMENT_BUCKET)
+          .uploadToSignedUrl(path, token, prepared, {
+            contentType: prepared.type,
+          });
+        if (error) throw error;
+
+        setAttachedImages((current) =>
+          current.map((image) =>
+            image.id === id
+              ? { ...image, path, status: "ready", error: "" }
+              : image,
+          ),
+        );
+      } catch (error) {
+        setAttachedImages((current) =>
+          current.map((image) =>
+            image.id === id
+              ? { ...image, status: "error", error: error.message }
+              : image,
+          ),
+        );
+      }
+    }
+  }
+
+  function removeImage(image) {
+    if (image.previewUrl) URL.revokeObjectURL(image.previewUrl);
+    setAttachedImages((current) =>
+      current.filter((entry) => entry.id !== image.id),
+    );
+    if (image.path) {
+      // Best effort: an orphaned object is harmless, and the bucket is private.
+      callAuthFunction("discard-report-upload", { path: image.path }).catch(
+        () => {},
       );
-      event.target.value = "";
+    }
+  }
+
+  function openReportEditor(report) {
+    setEditValues({
+      serviceDate: report.serviceDate || "",
+      arrivalTime: report.arrivalTime || "",
+      workPerformed: report.workPerformed || "",
+      issueDescription: report.issueDescription || "",
+      recommendations: report.recommendations || "",
+      additionalNotes: report.additionalNotes || "",
+      siteAddress:
+        report.siteAddress === "Not provided" ? "" : report.siteAddress || "",
+      clientSignoff: Boolean(report.clientSignoff),
+      clientSignoffName: report.clientSignoffName || "",
     });
+    setResubmitError("");
+    setEditReport(report);
+  }
+
+  function updateEditValue(field, value) {
+    setEditValues((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleResubmit() {
+    if (!editReport) return;
+    if (!editValues.workPerformed.trim() || !editValues.serviceDate) {
+      setResubmitError("Describe the work performed and give the service date.");
+      return;
+    }
+
+    setResubmitError("");
+    setIsResubmitting(true);
+    try {
+      await callAuthFunction("resubmit-field-report", {
+        reportId: editReport.reportUuid,
+        ...editValues,
+      });
+      setEditReport(null);
+      setOpenReport(null);
+      setReloadToken((token) => token + 1);
+    } catch (error) {
+      setResubmitError(error.message);
+    } finally {
+      setIsResubmitting(false);
+    }
   }
 
   async function handleSubmitReport() {
     if (!selectedJob) return;
-
     const partsUsed = (selectedJob.reservedParts || [])
       .filter((part) => usedParts[part.jobPartId]?.selected)
       .map((part) => ({
@@ -220,6 +376,16 @@ function FieldReports() {
       return;
     }
 
+    const hasUnreadyImage = attachedImages.some(
+      (image) => image.status !== "ready" || !image.path,
+    );
+    if (hasUnreadyImage) {
+      setSubmitError(
+        "Wait for every image to finish uploading, and remove any that failed.",
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitError("");
 
@@ -240,13 +406,10 @@ function FieldReports() {
         clientSignoff: formValues.clientSignoff,
         clientSignoffName: formValues.clientSignoffName,
         partsUsed,
-        images: attachedImages
-          .filter((image) => image && image.dataUrl)
-          .map((image) => ({
-            name: image.name,
-            type: image.type,
-            fileUrl: image.dataUrl,
-          })),
+        images: attachedImages.map((image) => ({
+          name: image.name,
+          path: image.path,
+        })),
       });
 
       navigate("/reports");
@@ -325,8 +488,18 @@ function FieldReports() {
                     </span>
                   </span>
                   <span className="mt-2 block text-[12px] text-[#778593]">
-                    {job.serviceLabel} · {job.technicianName}
+                    {job.serviceLabel}
                   </span>
+                  {job.assignedTechnicians?.length > 0 && (
+                    <span className="mt-1 block text-[11px] text-[#778593]">
+                      {job.assignedTechnicians
+                        .map(
+                          (technician) =>
+                            `${technician.name}${technician.reported ? " ✓" : " (pending)"}`,
+                        )
+                        .join(" · ")}
+                    </span>
+                  )}
                   <span className="mt-1 block text-[12px] text-[#778593]">
                     {job.siteAddress} · {job.serviceDate} {job.arrivalTime}
                   </span>
@@ -599,14 +772,22 @@ function FieldReports() {
                       ))}
                     </div>
                   ) : (
-                    <p className="mb-0 mt-3 text-[13px] text-[#778593]">
-                      No stock was reserved for this job.
-                    </p>
+                    <div className="mt-3 rounded-[6px] border border-[#e1e6eb] bg-[#f8fbff] px-3 py-2 text-[12px] text-[#607286]">
+                      {selectedJob.partsReconciledBy
+                        ? `Parts for this job were already reconciled by ${selectedJob.partsReconciledBy.name}${
+                            selectedJob.partsReconciledBy.reportNumber
+                              ? ` (${selectedJob.partsReconciledBy.reportNumber})`
+                              : ""
+                          }. Record the work you performed; parts are not claimed again.`
+                        : "No stock was reserved for this job."}
+                    </div>
                   )}
-                  <p className="mb-0 mt-2 text-[11px] text-[#8290a0]">
-                    Select the parts and quantities used. Unselected quantities
-                    are released when this report is submitted.
-                  </p>
+                  {selectedJob.reservedParts?.length ? (
+                    <p className="mb-0 mt-2 text-[11px] text-[#8290a0]">
+                      Select the parts and quantities used. Unselected quantities
+                      are released when this report is submitted.
+                    </p>
+                  ) : null}
                 </section>
                 <section className={card}>
                   <p className="m-0 text-[13px] font-bold text-[#68798a]">
@@ -637,28 +818,38 @@ function FieldReports() {
                           className="flex items-center justify-between gap-2 rounded-[6px] border border-[#dfe6ec] bg-[#f8fbff] px-2 py-2"
                         >
                           <div className="flex min-w-0 items-center gap-2">
-                            {image.dataUrl && (
+                            {image.previewUrl && (
                               <img
-                                src={image.dataUrl}
+                                src={image.previewUrl}
                                 alt={image.name}
                                 className="h-10 w-10 rounded-[5px] object-cover"
                               />
                             )}
-                            <span className="truncate text-[12px] text-[#607286]">
-                              {image.name}
+                            <span className="min-w-0">
+                              <span className="block truncate text-[12px] text-[#607286]">
+                                {image.name}
+                              </span>
+                              {image.status === "uploading" && (
+                                <span className="block text-[10px] text-[#8290a0]">
+                                  Uploading...
+                                </span>
+                              )}
+                              {image.status === "error" && (
+                                <span className="block text-[10px] text-[#b33a3a]">
+                                  {image.error || "Upload failed."}
+                                </span>
+                              )}
+                              {image.status === "ready" && (
+                                <span className="block text-[10px] text-[#388b47]">
+                                  Uploaded
+                                </span>
+                              )}
                             </span>
                           </div>
                           <button
                             type="button"
-                            className="text-[11px] font-bold text-[#b33a3a]"
-                            onClick={() =>
-                              setAttachedImages((currentImages) =>
-                                currentImages.filter(
-                                  (currentImage) =>
-                                    currentImage.id !== image.id,
-                                ),
-                              )
-                            }
+                            className="shrink-0 text-[11px] font-bold text-[#b33a3a]"
+                            onClick={() => removeImage(image)}
                           >
                             Remove
                           </button>
@@ -937,13 +1128,193 @@ function FieldReports() {
               )}
             </div>
 
-            <footer className="flex shrink-0 justify-end border-t border-[#e1e6eb] bg-[#f8fbff] px-6 py-4 max-[620px]:px-4">
+            <footer className="flex shrink-0 justify-end gap-2 border-t border-[#e1e6eb] bg-[#f8fbff] px-6 py-4 max-[620px]:px-4">
+              {openReport.reviewStatus === "returned" && !canFilterByTechnician && (
+                <button
+                  type="button"
+                  onClick={() => openReportEditor(openReport)}
+                  className="rounded-[6px] border border-[#1250a0] bg-white px-5 py-2.5 text-[12px] font-bold text-[#1250a0] hover:bg-[#f2f7ff]"
+                >
+                  Edit and resubmit
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setOpenReport(null)}
                 className="rounded-[6px] bg-[#1250a0] px-5 py-2.5 text-[12px] font-bold text-white hover:bg-[#0d438a]"
               >
                 Close
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {editReport && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-[#071426]/65 p-4 max-[620px]:items-end max-[620px]:p-0"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setEditReport(null);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Edit ${editReport.id}`}
+            className="flex max-h-[92vh] w-full max-w-[680px] flex-col overflow-hidden rounded-[10px] bg-white text-[#174276] shadow-[0_20px_60px_rgb(7_20_38_/_35%)] max-[620px]:max-h-[95vh] max-[620px]:rounded-b-none max-[620px]:rounded-t-[12px]"
+          >
+            <header className="shrink-0 border-b border-[#e1e6eb] px-6 py-5 max-[620px]:px-4">
+              <p className="m-0 text-[11px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
+                {editReport.id} · returned for correction
+              </p>
+              <h2 className="m-0 mt-1 text-[20px] font-bold">
+                Correct and resubmit
+              </h2>
+              <p className="m-0 mt-1 text-[12px] text-[#7d8994]">
+                {editReport.client} · {editReport.service}
+              </p>
+            </header>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-5 max-[620px]:px-4">
+              <div className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
+                <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
+                  Service date
+                  <input
+                    type="date"
+                    className={input}
+                    value={editValues.serviceDate}
+                    onChange={(event) =>
+                      updateEditValue("serviceDate", event.target.value)
+                    }
+                  />
+                </label>
+                <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
+                  Arrival time
+                  <input
+                    type="time"
+                    className={input}
+                    value={editValues.arrivalTime}
+                    onChange={(event) =>
+                      updateEditValue("arrivalTime", event.target.value)
+                    }
+                  />
+                </label>
+              </div>
+
+              <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
+                Work performed
+                <textarea
+                  rows={3}
+                  className={`${input} h-auto py-2`}
+                  value={editValues.workPerformed}
+                  onChange={(event) =>
+                    updateEditValue("workPerformed", event.target.value)
+                  }
+                />
+              </label>
+
+              <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
+                Issue found
+                <textarea
+                  rows={2}
+                  className={`${input} h-auto py-2`}
+                  value={editValues.issueDescription}
+                  onChange={(event) =>
+                    updateEditValue("issueDescription", event.target.value)
+                  }
+                />
+              </label>
+
+              <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
+                Recommendations
+                <textarea
+                  rows={2}
+                  className={`${input} h-auto py-2`}
+                  value={editValues.recommendations}
+                  onChange={(event) =>
+                    updateEditValue("recommendations", event.target.value)
+                  }
+                />
+              </label>
+
+              <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
+                Additional notes
+                <textarea
+                  rows={2}
+                  className={`${input} h-auto py-2`}
+                  value={editValues.additionalNotes}
+                  onChange={(event) =>
+                    updateEditValue("additionalNotes", event.target.value)
+                  }
+                />
+              </label>
+
+              <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
+                Site address
+                <input
+                  className={input}
+                  value={editValues.siteAddress}
+                  onChange={(event) =>
+                    updateEditValue("siteAddress", event.target.value)
+                  }
+                />
+              </label>
+
+              <label className="flex items-center gap-2 text-[12px] font-semibold text-[#45515c]">
+                <input
+                  type="checkbox"
+                  checked={editValues.clientSignoff}
+                  onChange={(event) =>
+                    updateEditValue("clientSignoff", event.target.checked)
+                  }
+                  className="h-4 w-4 rounded border-gray-300 text-[#1250a0] focus:ring-[#1250a0]"
+                />
+                Client signed off
+              </label>
+
+              {editValues.clientSignoff && (
+                <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
+                  Signed by
+                  <input
+                    className={input}
+                    value={editValues.clientSignoffName}
+                    onChange={(event) =>
+                      updateEditValue("clientSignoffName", event.target.value)
+                    }
+                  />
+                </label>
+              )}
+
+              <p className="m-0 rounded-[6px] border border-[#e1e6eb] bg-[#f8fbff] px-3 py-2 text-[11px] text-[#607286]">
+                Parts and stock usage stay exactly as first recorded. Correct the
+                narrative, then resubmit for review.
+              </p>
+
+              {resubmitError && (
+                <p
+                  className="m-0 rounded-[6px] border border-[#f0b8b0] bg-[#fff1ee] px-3 py-2 text-[12px] text-[#b64132]"
+                  role="alert"
+                >
+                  {resubmitError}
+                </p>
+              )}
+            </div>
+
+            <footer className="flex shrink-0 justify-end gap-2 border-t border-[#e1e6eb] bg-[#f8fbff] px-6 py-4 max-[620px]:px-4">
+              <button
+                type="button"
+                onClick={() => setEditReport(null)}
+                className="rounded-[6px] border border-[#dfe6ec] bg-white px-5 py-2.5 text-[12px] font-bold text-[#5e6b78] hover:bg-[#f2f7ff]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleResubmit}
+                disabled={isResubmitting}
+                className="rounded-[6px] bg-[#1250a0] px-5 py-2.5 text-[12px] font-bold text-white hover:bg-[#0d438a] disabled:opacity-50"
+              >
+                {isResubmitting ? "Resubmitting..." : "Resubmit for review"}
               </button>
             </footer>
           </section>

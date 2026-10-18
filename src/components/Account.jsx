@@ -11,6 +11,9 @@ const roles = [
   "Billing Staff",
 ];
 const branches = ["Makati", "Cebu"];
+// Legacy tolerance: accounts created before the alias was removed may still be
+// stored as "Sales Manager"; display them as Service Manager. No new account can
+// be created with that role.
 const normalizeAccountRole = (account) =>
   account.role === "Sales Manager"
     ? { ...account, role: "Service Manager" }
@@ -126,14 +129,13 @@ function Account() {
     const email = formData.get("email").trim().toLowerCase();
     const role = formData.get("role");
     const branch = formData.get("branch").toLowerCase();
-    const authRole = role === "Service Manager" ? "Sales Manager" : role;
 
     try {
       const { account } = await callAuthFunction("create-account", {
         firstName,
         lastName,
         email,
-        role: authRole,
+        role,
         branch,
         password: formData.get("password"),
       });

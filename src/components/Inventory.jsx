@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { callAuthFunction } from "../lib/auth.js";
+import { buildAllocationPrefill } from "../lib/allocation.js";
 
 function formatCurrency(value) {
   return `₱${Number(value || 0).toLocaleString("en-PH", {
@@ -106,6 +107,10 @@ function Inventory() {
   const [selectedJobId, setSelectedJobId] = useState("");
   const [selectedItems, setSelectedItems] = useState({});
   const [issueQuantities, setIssueQuantities] = useState({});
+  const [quotedByStockId, setQuotedByStockId] = useState({});
+  const [quotedUnavailable, setQuotedUnavailable] = useState([]);
+  const [quotedPartCount, setQuotedPartCount] = useState(0);
+  const [quotationNumber, setQuotationNumber] = useState("");
   const [pendingJobRequests, setPendingJobRequests] = useState([]);
   const [isLoadingPendingRequests, setIsLoadingPendingRequests] = useState(true);
   const [pendingRequestsError, setPendingRequestsError] = useState("");
@@ -122,6 +127,26 @@ function Inventory() {
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const categoryDropdownRef = useRef(null);
   const [searchTerm, setSearchTerm] = useState("");
+
+  // Shared by the deep link (?job=...) and the pending-request picker so both
+  // paths pre-fill the allocation list identically.
+  function applyJobAllocation(result) {
+    const prefill = buildAllocationPrefill(result);
+    setAllocationInventoryRecords(
+      (result.items || []).map(mapInventoryRecord),
+    );
+    setJobAllocation(result.job);
+    setSelectedItems(prefill.selected);
+    setIssueQuantities(prefill.quantities);
+    setQuotedByStockId(prefill.quotedByStock);
+    setQuotedUnavailable(prefill.unavailable);
+    setQuotedPartCount(prefill.quotedCount);
+    setQuotationNumber(result.quotationNumber || "");
+    setActiveTab("Stock Ledger");
+    setSelectedBranch(
+      result.job.branch.replace(/^./, (letter) => letter.toUpperCase()),
+    );
+  }
 
   useEffect(() => {
     let isCurrent = true;
@@ -148,18 +173,11 @@ function Inventory() {
             navigate("/reports/new", { replace: true });
             return;
           }
-          const records = (result.items || []).map(mapInventoryRecord);
           if (isJobAllocation) {
-            setAllocationInventoryRecords(records);
-          } else {
-            setInventoryRecords(records);
-          }
-          if (result.job) {
-            setJobAllocation(result.job);
+            applyJobAllocation(result);
             setSelectedJobId(result.job.jobNumber);
-            setSelectedBranch(
-              result.job.branch.replace(/^./, (letter) => letter.toUpperCase()),
-            );
+          } else {
+            setInventoryRecords((result.items || []).map(mapInventoryRecord));
           }
         }
       })
@@ -211,7 +229,11 @@ function Inventory() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const isAllocatingForJob = showJobCards && Boolean(jobAllocation);
+  // The deep link (/inventory/allocate?job=...) never sets showJobCards, so
+  // allocation mode has to follow the route as well; otherwise the row controls
+  // and the reserve action stay hidden on the path Scheduling hands off to.
+  const isAllocatingForJob =
+    Boolean(jobAllocation) && (showJobCards || isJobAllocation);
   const recordsToDisplay =
     isAllocatingForJob && inventoryRecords.length === 0
       ? allocationInventoryRecords
@@ -276,6 +298,13 @@ function Inventory() {
   };
 
   const selectedCount = Object.values(selectedItems).filter(Boolean).length;
+  const quotedEntries = Object.entries(quotedByStockId);
+  const quotedMatchedCount = quotedEntries.filter(
+    ([stockId, quoted]) => Number(issueQuantities[stockId] || 1) === Number(quoted),
+  ).length;
+  const quotedAdjustedCount = quotedEntries.length - quotedMatchedCount;
+  const hasQuotedDeviation =
+    quotedAdjustedCount > 0 || quotedUnavailable.length > 0;
 
   async function handleAcceptJobStock() {
     const jobNumber = jobAllocation?.jobNumber || allocationJobNumber;
@@ -326,11 +355,7 @@ function Inventory() {
         setPendingRequestsError("Stock has already been allocated to this job. Refresh the request list.");
         return;
       }
-      setAllocationInventoryRecords((result.items || []).map(mapInventoryRecord));
-      setJobAllocation(result.job);
-      setSelectedBranch(
-        result.job.branch.replace(/^./, (letter) => letter.toUpperCase()),
-      );
+      applyJobAllocation(result);
     } catch (error) {
       setInventoryError(error.message);
       setShowJobCards(false);
@@ -346,6 +371,10 @@ function Inventory() {
     setSelectedJobId("");
     setSelectedItems({});
     setIssueQuantities({});
+    setQuotedByStockId({});
+    setQuotedUnavailable([]);
+    setQuotedPartCount(0);
+    setQuotationNumber("");
     setAllocationInventoryRecords([]);
     setSelectedBranch(branchBeforeJobAllocation.current);
     setActionError("");
@@ -654,6 +683,50 @@ function Inventory() {
                     <span>Action</span>
                 </div>
 
+                {/* Quotation pre-fill summary — a soft flag, never a blocker */}
+                {isAllocatingForJob && quotedPartCount > 0 && (
+                  <div
+                    className={`border-b px-7 py-3 text-[12px] ${
+                      hasQuotedDeviation
+                        ? "border-[#f0dcb4] bg-[#fffbf2] text-[#7a5a12]"
+                        : "border-[#cfe6c8] bg-[#f4fbf2] text-[#3f6b34]"
+                    }`}
+                  >
+                    <p className="m-0">
+                      <span className="material-symbols-outlined mr-1 align-middle text-[15px]">
+                        {hasQuotedDeviation ? "info" : "check_circle"}
+                      </span>
+                      <strong>
+                        {quotedMatchedCount} of {quotedPartCount}
+                      </strong>{" "}
+                      quoted part{" "}
+                      {quotedPartCount === 1 ? "line matches" : "lines match"}{" "}
+                      {quotationNumber
+                        ? `the quotation ${quotationNumber}`
+                        : "the quotation"}
+                      .
+                      {quotedAdjustedCount > 0 &&
+                        ` ${quotedAdjustedCount} adjusted for the branch.`}
+                      {quotedUnavailable.length > 0 &&
+                        ` ${quotedUnavailable.length} cannot be covered from stock.`}
+                      <span className="ml-1 opacity-80">
+                        Adjusting is allowed and does not block the reservation.
+                      </span>
+                    </p>
+                    {quotedUnavailable.length > 0 && (
+                      <ul className="m-0 mt-1 list-disc pl-5 text-[11px]">
+                        {quotedUnavailable.map((line) => (
+                          <li key={`${line.partId}-${line.reason}`}>
+                            <strong>{line.description || "Part"}</strong>:
+                            quoted {line.quoted}, available {line.available} —{" "}
+                            {line.reason.toLowerCase()}.
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
+
                 {inventoryError && (
                   <p
                     className="m-0 border-b border-[#f1b7af] bg-[#fff3f1] px-7 py-3 text-[12px] text-[#a83a2c]"
@@ -703,6 +776,12 @@ function Inventory() {
                       const isJobBranch =
                         branch.toLowerCase() ===
                         String(jobAllocation?.branch || "").toLowerCase();
+                      const quotedQuantity = quotedByStockId[stockId];
+                      const isQuotedLine = quotedQuantity != null;
+                      const deviatesFromQuote =
+                        isQuotedLine &&
+                        Number(issueQuantities[stockId] || 1) !==
+                          Number(quotedQuantity);
                       return (
                         <Fragment key={stockId}>
                           {/* Desktop / tablet table row (unchanged layout) */}
@@ -734,6 +813,20 @@ function Inventory() {
                                 <strong className="block truncate">{name}</strong>
                                 <small className="mt-1 block text-[10px] text-[#8d969e]">
                                   {code}
+                                  {isAllocatingForJob && (
+                                    <span
+                                      className={
+                                        deviatesFromQuote
+                                          ? "font-bold text-[#b57b16]"
+                                          : undefined
+                                      }
+                                    >
+                                      {" · "}
+                                      {isQuotedLine
+                                        ? `quoted ${quotedQuantity}`
+                                        : "not in quote"}
+                                    </span>
+                                  )}
                                 </small>
                               </span>
                             </div>
@@ -799,7 +892,11 @@ function Inventory() {
                                     onChange={(event) =>
                                       handleQuantityChange(stockId, event.target.value)
                                     }
-                                    className="h-8 w-[68px] rounded border border-[#d9dfe4] bg-white px-2 text-center text-[11px] text-[#1250a0] outline-none focus:border-[#1250a0] disabled:bg-[#f2f4f6]"
+                                    className={`h-8 w-[68px] rounded border px-2 text-center text-[11px] text-[#1250a0] outline-none focus:border-[#1250a0] disabled:bg-[#f2f4f6] ${
+                                      deviatesFromQuote
+                                        ? "border-[#e0a63c] bg-[#fffaf0]"
+                                        : "border-[#d9dfe4] bg-white"
+                                    }`}
                                   />
                                 </>
                               ) : (
@@ -843,6 +940,10 @@ function Inventory() {
                               </strong>
                               <small className="mt-1 block truncate text-[11px] text-[#8d969e]">
                                 {code} • {branch}
+                                {isAllocatingForJob &&
+                                  (isQuotedLine
+                                    ? ` • quoted ${quotedQuantity}`
+                                    : " • not in quote")}
                               </small>
                             </div>
                             <div className="flex flex-none flex-col items-end gap-1.5">
@@ -879,7 +980,11 @@ function Inventory() {
                                     onChange={(event) =>
                                       handleQuantityChange(stockId, event.target.value)
                                     }
-                                    className="h-8 w-[68px] rounded border border-[#d9dfe4] bg-white px-2 text-center text-[11px] text-[#1250a0] outline-none focus:border-[#1250a0] disabled:bg-[#f2f4f6]"
+                                    className={`h-8 w-[68px] rounded border px-2 text-center text-[11px] text-[#1250a0] outline-none focus:border-[#1250a0] disabled:bg-[#f2f4f6] ${
+                                      deviatesFromQuote
+                                        ? "border-[#e0a63c] bg-[#fffaf0]"
+                                        : "border-[#d9dfe4] bg-white"
+                                    }`}
                                   />
                                 </div>
                               ) : (

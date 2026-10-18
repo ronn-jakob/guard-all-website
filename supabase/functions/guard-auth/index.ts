@@ -95,10 +95,25 @@ async function verifyToken(request: Request) {
   if (!token) return null;
   const [header, body, signature] = token.split(".");
   if (!header || !body || !signature) return null;
-  const key = await crypto.subtle.importKey("raw", encoder.encode(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
-  const valid = await crypto.subtle.verify("HMAC", key, fromBase64Url(signature), encoder.encode(`${header}.${body}`));
-  if (!valid) return null;
-  const payload = JSON.parse(decoder.decode(fromBase64Url(body)));
+
+  let payload: any;
+  try {
+    // Inspect the header before trusting anything inside the token. The signature
+    // is always HMAC-SHA256, so an unexpected alg or typ is simply not our token.
+    const tokenHeader = JSON.parse(decoder.decode(fromBase64Url(header)));
+    if (tokenHeader?.alg !== "HS256") return null;
+    if (tokenHeader?.typ && tokenHeader.typ !== "JWT") return null;
+
+    const key = await crypto.subtle.importKey("raw", encoder.encode(Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+    const valid = await crypto.subtle.verify("HMAC", key, fromBase64Url(signature), encoder.encode(`${header}.${body}`));
+    if (!valid) return null;
+
+    payload = JSON.parse(decoder.decode(fromBase64Url(body)));
+  } catch {
+    // A segment that cannot be decoded is not a valid token; never surface it as
+    // a server error.
+    return null;
+  }
   if (!(payload.exp > Math.floor(Date.now() / 1000))) return null;
 
   // A valid signature alone is not enough. The account must still be active, and
@@ -153,12 +168,33 @@ function isSchedulingRole(role: string) {
   return rolePermissions[role]?.some(([module]) => module === "scheduling") ?? false;
 }
 
-const schedulingActions = new Set(["list-technicians", "list-schedules", "create-schedule", "get-schedule", "update-schedule", "confirm-job-assignment"]);
-const fieldReportActions = new Set(["list-field-report-jobs", "list-field-reports", "submit-field-report"]);
+function isSalesBillingRole(role: string) {
+  return rolePermissions[role]?.some(([module]) => module === "sales_billing") ?? false;
+}
+
+const schedulingActions = new Set(["list-technicians", "list-schedules", "create-schedule", "get-schedule", "update-schedule", "confirm-job-assignment", "create-job-from-template", "list-clients"]);
+const fieldReportActions = new Set(["list-field-report-jobs", "list-field-reports", "submit-field-report", "resubmit-field-report", "create-report-upload", "discard-report-upload"]);
 const inventoryActions = new Set(["list-inventory", "create-inventory-item", "adjust-inventory-stock", "update-inventory-item"]);
 const jobAllocationActions = new Set(["list-pending-job-requests", "list-job-allocation-stock", "allocate-job-stock", "list-job-allocation-history"]);
+// Invoicing and payments belong to the sales_billing module (Billing Staff, Admin).
+const billingActions = new Set(["list-invoices", "list-invoice-candidates", "create-invoice", "record-payment"]);
 // Actions a signed-in user may perform on their own account, bypassing the module role check.
 const selfServiceActions = new Set(["change-password", "update-profile"]);
+// The landing dashboard is available to every signed-in user; the payload itself is
+// role-aware, so financial figures never reach roles that should not see them.
+const universalActions = new Set(["dashboard-summary"]);
+
+// Field-report photos live in a private bucket and reach the browser only through
+// short-lived signed URLs minted here with the service role.
+const ATTACHMENT_BUCKET = "report-attachments";
+const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+const MAX_REPORT_ATTACHMENTS = 5;
+const ATTACHMENT_CONTENT_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+// reports/<job_id>/<user_id>/<uuid>.<ext> — a session may only attach uploads it
+// made itself, for the job it is reporting on.
+const ATTACHMENT_PATH_PATTERN = /^reports\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\.(jpg|jpeg|png|webp)$/i;
+const attachmentExtension = (contentType: string) =>
+  contentType === "image/png" ? "png" : contentType === "image/webp" ? "webp" : "jpg";
 
 function jobTypeFor(serviceType: string) {
   if (serviceType === "Installation") return "installation";
@@ -245,7 +281,7 @@ async function hasOnlyActiveTechnicianRole(technicianIds: string[]) {
 async function listSchedules() {
   const { data: jobs, error } = await supabase
     .from("jobs")
-    .select("job_id, job_number, job_type, status, branch, scheduled_date, scheduled_time, parts_status, assignment_confirmed_at, clients(name, address), job_technicians(technician_id, is_active, technicians(users(first_name, last_name)))")
+    .select("job_id, job_number, job_type, status, branch, scheduled_date, scheduled_time, scheduled_end_time, parts_status, assignment_confirmed_at, site_address, quotation_id, clients(name, address), job_technicians(technician_id, is_active, technicians(users(first_name, last_name)))")
     .neq("status", "cancelled")
     .order("scheduled_date")
     .order("scheduled_time");
@@ -280,6 +316,9 @@ async function listSchedules() {
       stock: "Available",
       partsStatus: job.parts_status,
       assignmentConfirmedAt: job.assignment_confirmed_at,
+      siteAddress: job.site_address,
+      quotationId: job.quotation_id,
+      endTime: String(job.scheduled_end_time ?? "").slice(0, 5),
     };
   });
 }
@@ -356,6 +395,73 @@ async function listJobAllocationHistory() {
   });
 }
 
+// Templates are the standard priced packages that Billing Staff maintain. The
+// client-facing total is the sum of the priced lines; part lines carry unit_price 0
+// and exist only to tell the warehouse what to allocate.
+async function listJobTemplates(session: Record<string, unknown>) {
+  // Markup is commercially sensitive: only sales_billing roles receive it, so a
+  // Service Manager never sees the percentage behind the price.
+  const includeMarkup = isSalesBillingRole(String(session.role ?? ""));
+
+  const { data, error } = await supabase
+    .from("job_templates")
+    .select("template_id, name, job_type, branch, description, is_active, markup_percent, created_at, job_template_items(item_id, line_type, part_id, description, quantity, unit_price, line_total)")
+    .order("name");
+  if (error) throw error;
+
+  return (data ?? []).map((template: any) => {
+    const items = (Array.isArray(template.job_template_items) ? template.job_template_items : [])
+      .slice()
+      .sort((left: any, right: any) => String(left.item_id).localeCompare(String(right.item_id)));
+    const factor = 1 + Number(template.markup_percent || 0) / 100;
+
+    // Base prices are only exposed to sales_billing roles; everyone else sees the
+    // quoted price alone. Rounding is per line so `total` matches the quotation
+    // that gioms_create_job_from_template will generate.
+    const mappedItems: any[] = items.map((item: any) => {
+      const quantity = Number(item.quantity);
+      const baseUnit = Number(item.unit_price);
+      const clientUnit = Math.round(baseUnit * factor * 100) / 100;
+      return {
+        id: item.item_id,
+        lineType: item.line_type,
+        partId: item.part_id ?? "",
+        description: item.description,
+        quantity,
+        unitPriceClient: clientUnit,
+        lineTotalClient: Math.round(quantity * clientUnit * 100) / 100,
+        ...(includeMarkup
+          ? {
+              unitPriceBase: baseUnit,
+              lineTotalBase: Math.round(quantity * baseUnit * 100) / 100,
+            }
+          : {}),
+      };
+    });
+
+    return {
+      id: template.template_id,
+      name: template.name,
+      jobType: template.job_type,
+      branch: template.branch ?? "",
+      description: template.description ?? "",
+      isActive: template.is_active,
+      createdAt: template.created_at,
+      items: mappedItems,
+      total: mappedItems.reduce((sum: number, item: any) => sum + item.lineTotalClient, 0),
+      ...(includeMarkup
+        ? {
+            markupPercent: Number(template.markup_percent),
+            subtotal: mappedItems.reduce(
+              (sum: number, item: any) => sum + (item.lineTotalBase ?? 0),
+              0,
+            ),
+          }
+        : {}),
+    };
+  });
+}
+
 async function getCurrentTechnicianId(session: Record<string, unknown>) {
   const { data: technician, error } = await supabase
     .from("technicians")
@@ -385,34 +491,57 @@ async function getCurrentTechnicianId(session: Record<string, unknown>) {
   return createdTechnician.technician_id;
 }
 
+// Read-only counterpart to getCurrentTechnicianId: opening the picker must not
+// create a technician record for someone who has none.
+async function findCurrentTechnicianId(session: Record<string, unknown>) {
+  const { data, error } = await supabase
+    .from("technicians")
+    .select("technician_id")
+    .eq("user_id", session.sub)
+    .maybeSingle();
+  if (error) throw error;
+  return (data?.technician_id as string | undefined) ?? "";
+}
+
 async function listFieldReportJobs(session: Record<string, unknown>) {
+  const technicianRoles = new Set(["Technician", "Service Manager", "Sales Manager"]);
+  const isTechnicianView = technicianRoles.has(String(session.role ?? ""));
+  const myTechnicianId = isTechnicianView ? await findCurrentTechnicianId(session) : "";
+
+  // A technician-role user with no technician record is assigned to nothing, so
+  // there is no job to report. This matches the previous scoped query.
+  if (isTechnicianView && !myTechnicianId) return [];
+
   let query = supabase
     .from("jobs")
-    .select("job_id, job_number, job_type, branch, scheduled_date, scheduled_time, clients(name, address), job_parts(job_part_id, quantity, status, parts(sku, name)), job_technicians!inner(technician_id, is_active, technicians!inner(user_id, users(first_name, last_name)))")
+    .select("job_id, job_number, job_type, branch, parts_status, scheduled_date, scheduled_time, clients(name, address), job_parts(job_part_id, quantity, status, parts(sku, name)), job_technicians!inner(technician_id, is_active, technicians!inner(technician_id, users(first_name, last_name)))")
     .eq("job_technicians.is_active", true)
     .neq("status", "cancelled")
     .order("scheduled_date")
     .order("scheduled_time");
 
-  const technicianRoles = new Set(["Technician", "Service Manager", "Sales Manager"]);
-  if (technicianRoles.has(String(session.role ?? ""))) {
-    query = query.eq("job_technicians.technicians.user_id", session.sub);
+  if (isTechnicianView && myTechnicianId) {
+    query = query.eq("job_technicians.technician_id", myTechnicianId);
   }
 
   const { data: jobs, error } = await query;
   if (error) throw error;
 
-  // A job drops out of the picker once any technician has filed a report for it,
-  // so the picker only ever lists work that still needs a report.
-  const reportedJobIds = new Set<string>();
-  const { data: submittedReports, error: submittedReportError } = await supabase
+  // Reports are a per-technician collection: everyone assigned files one, and the
+  // job leaves only the filer's picker. The earliest report is the one billing
+  // references, and it is also the one that reconciled the job's parts.
+  const { data: reports, error: reportsError } = await supabase
     .from("field_reports")
-    .select("job_id")
-    .not("job_id", "is", null);
+    .select("job_id, technician_id, report_number, submitted_at, technicians!inner(users(first_name, last_name))")
+    .order("submitted_at");
+  if (reportsError) throw reportsError;
 
-  if (submittedReportError) throw submittedReportError;
-  (submittedReports ?? []).forEach((report: { job_id: string }) => {
-    if (report.job_id) reportedJobIds.add(report.job_id);
+  const reportsByJob = new Map<string, any[]>();
+  (reports ?? []).forEach((report: any) => {
+    if (!report.job_id) return;
+    const list = reportsByJob.get(report.job_id) ?? [];
+    list.push(report);
+    reportsByJob.set(report.job_id, list);
   });
 
   const { data: stockMovements, error: stockMovementError } = await supabase
@@ -426,17 +555,76 @@ async function listFieldReportJobs(session: Record<string, unknown>) {
   );
 
   return (jobs ?? [])
-    .filter((job: any) =>
-      (allocatedJobIds.has(job.job_id) ||
+    .filter((job: any) => {
+      const jobReports = reportsByJob.get(job.job_id) ?? [];
+      const activeAssignments = (Array.isArray(job.job_technicians)
+        ? job.job_technicians
+        : []
+      ).filter((assignment: any) => assignment.is_active);
+      const reportedTechnicianIds = new Set(
+        jobReports.map((report: any) => report.technician_id),
+      );
+
+      if (isTechnicianView) {
+        // Only this technician's own report removes the job from their picker.
+        if (myTechnicianId && reportedTechnicianIds.has(myTechnicianId)) {
+          return false;
+        }
+      } else if (
+        activeAssignments.length > 0 &&
+        activeAssignments.every((assignment: any) =>
+          reportedTechnicianIds.has(assignment.technician_id),
+        )
+      ) {
+        // A manager's picker lists a job only while someone still owes a report.
+        return false;
+      }
+
+      // A teammate's report keeps the job visible even after the parts have been
+      // reconciled, because the collection is not finished until everyone files.
+      return (
+        allocatedJobIds.has(job.job_id) ||
         job.job_type === "maintenance" ||
-        (job.job_parts ?? []).some((part: any) => part.status === "reserved")) &&
-      !reportedJobIds.has(job.job_id)
-    )
+        (job.job_parts ?? []).some((part: any) => part.status === "reserved") ||
+        jobReports.length > 0
+      );
+    })
     .map((job: any) => {
       const client = Array.isArray(job.clients) ? job.clients[0] : job.clients;
-      const assignment = Array.isArray(job.job_technicians) ? job.job_technicians[0] : job.job_technicians;
-      const technician = assignment && (Array.isArray(assignment.technicians) ? assignment.technicians[0] : assignment.technicians);
-      const user = technician && (Array.isArray(technician.users) ? technician.users[0] : technician.users);
+      const jobReports = reportsByJob.get(job.job_id) ?? [];
+      const activeAssignments = (Array.isArray(job.job_technicians)
+        ? job.job_technicians
+        : []
+      ).filter((assignment: any) => assignment.is_active);
+      const reportedTechnicianIds = new Set(
+        jobReports.map((report: any) => report.technician_id),
+      );
+      const nameOf = (report: any) => {
+        const technician = Array.isArray(report.technicians)
+          ? report.technicians[0]
+          : report.technicians;
+        const user = technician && (Array.isArray(technician.users)
+          ? technician.users[0]
+          : technician.users);
+        return user
+          ? [user.first_name, user.last_name].filter(Boolean).join(" ")
+          : "Technician";
+      };
+      const assignedTechnicians = activeAssignments.map((assignment: any) => {
+        const technician = Array.isArray(assignment.technicians)
+          ? assignment.technicians[0]
+          : assignment.technicians;
+        const user = technician && (Array.isArray(technician.users)
+          ? technician.users[0]
+          : technician.users);
+        return {
+          technicianId: assignment.technician_id,
+          name: user
+            ? [user.first_name, user.last_name].filter(Boolean).join(" ")
+            : "Technician",
+          reported: reportedTechnicianIds.has(assignment.technician_id),
+        };
+      });
       const reservedParts = (job.job_parts ?? [])
         .filter((reservation: any) => reservation.status === "reserved")
         .map((reservation: any) => {
@@ -448,6 +636,8 @@ async function listFieldReportJobs(session: Record<string, unknown>) {
             quantity: reservation.quantity,
           };
         });
+      const allParts = job.job_parts ?? [];
+      const earliestReport = jobReports[0];
       return {
         jobId: job.job_id,
         jobNumber: job.job_number,
@@ -455,7 +645,22 @@ async function listFieldReportJobs(session: Record<string, unknown>) {
         serviceType: job.job_type,
         serviceLabel: serviceLabelFor(job.job_type),
         siteAddress: client?.address ?? `${String(job.branch).replace(/^./, (letter) => letter.toUpperCase())} branch`,
-        technicianName: user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "Unassigned",
+        technicianName:
+          assignedTechnicians.map((technician: any) => technician.name).join(", ") ||
+          "Unassigned",
+        assignedTechnicians,
+        assignedCount: assignedTechnicians.length,
+        reportedCount: assignedTechnicians.filter((technician: any) => technician.reported).length,
+        // Only meaningful once the first report has reconciled the reservations.
+        partsReconciledBy:
+          allParts.length > 0 &&
+          earliestReport &&
+          !allParts.some((part: any) => part.status === "reserved")
+            ? {
+                name: nameOf(earliestReport),
+                reportNumber: earliestReport.report_number ?? "",
+              }
+            : null,
         serviceDate: String(job.scheduled_date),
         arrivalTime: String(job.scheduled_time ?? "").slice(0, 5),
         reservedParts,
@@ -512,7 +717,7 @@ async function listFieldReports(session: Record<string, unknown>, requestedTechn
       recommendations,
       report_parts_used(quantity, parts(sku, name)),
       report_attachments(file_type, file_url),
-      jobs!inner(job_id, job_number, job_type, clients(name, address)),
+      jobs!inner(job_id, job_number, job_type, clients(name, address), job_technicians(technician_id, is_active)),
       technicians!inner(technician_id, user_id, users(first_name, last_name))
     `)
     .in("review_status", ["submitted", "approved", "returned"]);
@@ -616,11 +821,48 @@ async function listFieldReports(session: Record<string, unknown>, requestedTechn
       };
     });
 
+  // Attachments are stored as object paths and signed on read; legacy base64 rows
+  // are passed through untouched so reports filed before the bucket keep rendering.
+  const attachmentPaths = Array.from(
+    new Set(
+      (reports ?? []).flatMap((report: any) =>
+        (report.report_attachments ?? [])
+          .map((attachment: any) => String(attachment?.file_url ?? ""))
+          .filter((url: string) => url && !url.startsWith("data:")),
+      ),
+    ),
+  );
+  const signedAttachmentUrls = new Map<string, string>();
+  if (attachmentPaths.length) {
+    const { data: signed, error: signError } = await supabase.storage
+      .from(ATTACHMENT_BUCKET)
+      .createSignedUrls(attachmentPaths, 3600);
+    if (signError) {
+      console.error("Could not sign report attachments:", signError.message);
+    } else {
+      (signed ?? []).forEach((entry: any) => {
+        if (entry?.path && entry?.signedUrl) {
+          signedAttachmentUrls.set(entry.path, entry.signedUrl);
+        }
+      });
+    }
+  }
+
   const submittedReportItems = (reports ?? []).map((report: any) => {
     const job = Array.isArray(report.jobs) ? report.jobs[0] : report.jobs;
     const client = job && (Array.isArray(job.clients) ? job.clients[0] : job.clients);
     const technician = Array.isArray(report.technicians) ? report.technicians[0] : report.technicians;
     const user = technician && (Array.isArray(technician.users) ? technician.users[0] : technician.users);
+    // A job holds one report per assigned technician; the count lets the review
+    // screen show the collection as "2 of 3 reported".
+    const jobAssignments = Array.isArray(job?.job_technicians)
+      ? job.job_technicians
+      : job?.job_technicians
+        ? [job.job_technicians]
+        : [];
+    const jobTechnicianCount = jobAssignments.filter(
+      (assignment: any) => assignment.is_active,
+    ).length;
     const submittedAt = report.submitted_at ? new Date(report.submitted_at) : new Date();
     const status = report.review_status === "approved" ? "Ready for Billing" : report.review_status === "returned" ? "Needs Review" : "Submitted";
     const tone = report.review_status === "approved" ? "green" : report.review_status === "returned" ? "orange" : "green";
@@ -649,11 +891,15 @@ async function listFieldReports(session: Record<string, unknown>, requestedTechn
             note: "Used",
           };
         }),
-      images: (report.report_attachments ?? []).map((attachment: any) => ({
-        name: attachment.file_type || "attachment",
-        src: attachment.file_url || "",
-        alt: attachment.file_type || "Field report attachment",
-      })),
+      images: (report.report_attachments ?? []).map((attachment: any) => {
+        const stored = String(attachment.file_url ?? "");
+        return {
+          name: attachment.file_type || "attachment",
+          // Legacy data URLs render directly; bucket paths are signed above.
+          src: stored.startsWith("data:") ? stored : signedAttachmentUrls.get(stored) ?? "",
+          alt: attachment.file_type || "Field report attachment",
+        };
+      }),
       signature: {
         signer: report.client_signoff_name || "Not provided",
         signedAt: report.submitted_at ? new Date(report.submitted_at).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }) : "Pending sign-off",
@@ -668,6 +914,11 @@ async function listFieldReports(session: Record<string, unknown>, requestedTechn
         { time: submittedAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }), action: "Report submitted", actor: user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "Unknown technician" },
       ],
       jobId: job?.job_id ?? null,
+      jobNumber: job?.job_number ?? "",
+      jobTechnicianCount,
+      workPerformed: report.work_performed || "",
+      clientSignoff: Boolean(report.client_signoff),
+      clientSignoffName: report.client_signoff_name || "",
       siteAddress: report.site_address || client?.address || "Not provided",
       issueDescription: report.issue_description || "",
       recommendations: report.recommendations || "",
@@ -700,6 +951,26 @@ async function submitFieldReport(session: Record<string, unknown>, body: Record<
     throw new Error("Please complete the required report fields before submitting.");
   }
 
+  // Images must already be uploaded to the bucket by this session, for this job.
+  // Data URLs are rejected outright: the whole point of the bucket is to keep
+  // blobs out of the database.
+  const attachmentPaths = attachments
+    .map((attachment: any) => String(attachment?.path ?? "").trim())
+    .filter(Boolean);
+  if (attachments.length > MAX_REPORT_ATTACHMENTS) {
+    throw new Error(`Attach at most ${MAX_REPORT_ATTACHMENTS} images.`);
+  }
+  if (
+    attachmentPaths.length !== attachments.length ||
+    attachmentPaths.some(
+      (path: string) =>
+        !ATTACHMENT_PATH_PATTERN.test(path) ||
+        !path.startsWith(`reports/${jobId}/${session.sub}/`),
+    )
+  ) {
+    throw new Error("One or more images were not uploaded correctly. Remove them and try again.");
+  }
+
   const technicianId = await getCurrentTechnicianId(session);
   const { data: existingReport, error: existingReportError } = await supabase
     .from("field_reports")
@@ -710,7 +981,7 @@ async function submitFieldReport(session: Record<string, unknown>, body: Record<
 
   if (existingReportError) throw existingReportError;
   if (existingReport) {
-    throw new Error("A field report has already been submitted for this job. Please submit a new report only when a new job is assigned.");
+    throw new Error("You have already submitted a field report for this job. Each technician files one report per job.");
   }
 
   const { data: report, error: reportError } = await supabase.rpc(
@@ -731,9 +1002,7 @@ async function submitFieldReport(session: Record<string, unknown>, body: Record<
         jobPartId: String(part?.jobPartId ?? ""),
         quantity: Number(part?.quantity),
       })),
-      p_attachments: attachments.map((attachment: any) => ({
-        fileUrl: String(attachment?.fileUrl ?? attachment?.url ?? attachment?.dataUrl ?? "").trim(),
-      })),
+      p_attachments: attachmentPaths.map((path: string) => ({ fileUrl: path })),
     },
   );
 
@@ -798,7 +1067,147 @@ Deno.serve(async (request: Request) => {
     // Reviewing a field report is a manager decision: explicitly exclude Technicians,
     // who otherwise pass the field-report role check.
     const canReviewReports = action === "review-field-report" && ["Admin", "Service Manager", "Sales Manager"].includes(session.role);
-    if (!selfServiceActions.has(action) && !canManageSchedule && !canLoadFieldReports && !canManageInventory && !canAllocateJobStock && !canReviewReports && session.role !== "Admin") return response({ error: "Administrator access is required." }, 403);
+    // Anyone who schedules needs to read templates; only sales_billing roles maintain them.
+    const canReadTemplates = action === "list-job-templates" && (isSchedulingRole(session.role) || isSalesBillingRole(session.role));
+    const canManageTemplates = action === "save-job-template" && isSalesBillingRole(session.role);
+    // Billing Staff need the parts catalog to build templates; inventory roles keep it too.
+    const canReadParts = action === "list-parts" && (isSalesBillingRole(session.role) || ["Admin", "Warehouse Manager"].includes(session.role));
+    const canManageBilling = billingActions.has(action) && isSalesBillingRole(session.role);
+    // Moving legacy base64 images into the bucket is a one-off administrative job.
+    const canMigrateAttachments = action === "migrate-report-attachments" && session.role === "Admin";
+    const allowed = [
+      selfServiceActions.has(action),
+      universalActions.has(action),
+      canManageSchedule,
+      canLoadFieldReports,
+      canManageInventory,
+      canAllocateJobStock,
+      canReviewReports,
+      canReadTemplates,
+      canManageTemplates,
+      canReadParts,
+      canManageBilling,
+      canMigrateAttachments,
+      session.role === "Admin",
+    ].some(Boolean);
+    if (!allowed) return response({ error: "Administrator access is required." }, 403);
+
+    if (action === "dashboard-summary") {
+      const first = (value: any) => (Array.isArray(value) ? value[0] : value);
+      const role = String(session.role ?? "");
+      const technicianRoles = new Set(["Technician", "Service Manager", "Sales Manager"]);
+      const isTechnicianView = technicianRoles.has(role);
+      const myTechnicianId = isTechnicianView ? await findCurrentTechnicianId(session) : "";
+      const today = new Date().toISOString().slice(0, 10);
+
+      const { data: jobRows, error: jobsError } = await supabase
+        .from("jobs")
+        .select("job_id, job_number, job_type, branch, status, parts_status, scheduled_date, scheduled_time, clients(name, address), job_technicians(technician_id, is_active, technicians(users(first_name, last_name)))")
+        .neq("status", "cancelled")
+        .gte("scheduled_date", today)
+        .order("scheduled_date")
+        .order("scheduled_time")
+        .limit(60);
+      if (jobsError) throw jobsError;
+
+      const activeAssignments = (job: any) =>
+        (Array.isArray(job.job_technicians) ? job.job_technicians : []).filter(
+          (assignment: any) => assignment.is_active,
+        );
+      // A technician only ever sees their own work; everyone else sees the board.
+      const scopedJobs =
+        isTechnicianView && myTechnicianId
+          ? (jobRows ?? []).filter((job: any) =>
+              activeAssignments(job).some(
+                (assignment: any) => assignment.technician_id === myTechnicianId,
+              ),
+            )
+          : (jobRows ?? []);
+
+      const nameOfAssignment = (assignment: any) => {
+        const technician = first(assignment.technicians);
+        const user = technician ? first(technician.users) : null;
+        return user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "";
+      };
+
+      const jobs = scopedJobs.slice(0, 5).map((job: any) => {
+        const client = first(job.clients);
+        const names = activeAssignments(job).map(nameOfAssignment).filter(Boolean);
+        return {
+          jobNumber: job.job_number,
+          time: String(job.scheduled_time ?? "").slice(0, 5),
+          scheduledDate: String(job.scheduled_date),
+          serviceLabel: serviceLabelFor(job.job_type),
+          clientName: client?.name ?? "Unnamed client",
+          siteAddress:
+            client?.address ??
+            `${String(job.branch).replace(/^./, (letter) => letter.toUpperCase())} branch`,
+          technicianName: names.join(", ") || "Unassigned",
+          technicianInitials: names.length
+            ? names[0]
+                .split(/\s+/)
+                .map((part: string) => part[0])
+                .slice(0, 2)
+                .join("")
+            : "—",
+          partsStatus: job.parts_status,
+        };
+      });
+
+      const pendingRequests = await listPendingJobRequests();
+
+      const { count: reportsAwaitingReview, error: reportCountError } = await supabase
+        .from("field_reports")
+        .select("report_id", { count: "exact", head: true })
+        .eq("review_status", "submitted");
+      if (reportCountError) throw reportCountError;
+
+      const { data: stockRows, error: stockError } = await supabase
+        .from("stock")
+        .select("quantity_on_hand, parts!inner(reorder_threshold)");
+      if (stockError) throw stockError;
+      const lowStock = (stockRows ?? []).filter((row: any) => {
+        const threshold = Number(first(row.parts)?.reorder_threshold ?? 0);
+        return Number(row.quantity_on_hand) <= threshold;
+      }).length;
+
+      // Financial figures are limited to Admin, Service Manager and Billing Staff.
+      let openInvoices: { count: number; amount: number } | null = null;
+      if (["Admin", "Service Manager", "Billing Staff"].includes(role)) {
+        const { data: invoiceRows, error: invoiceError } = await supabase
+          .from("invoices")
+          .select("invoice_id, total_amount, status, payments(amount)")
+          .neq("status", "cancelled");
+        if (invoiceError) throw invoiceError;
+        let amount = 0;
+        let count = 0;
+        (invoiceRows ?? []).forEach((invoice: any) => {
+          const total = Number(invoice.total_amount) || 0;
+          const paid = (Array.isArray(invoice.payments) ? invoice.payments : []).reduce(
+            (sum: number, payment: any) => sum + (Number(payment.amount) || 0),
+            0,
+          );
+          const balance = total - paid;
+          if (balance > 0) {
+            count += 1;
+            amount += balance;
+          }
+        });
+        openInvoices = { count, amount: Math.round(amount * 100) / 100 };
+      }
+
+      return response({
+        jobs,
+        counts: {
+          todayJobs: scopedJobs.filter((job: any) => String(job.scheduled_date) === today).length,
+          upcomingJobs: scopedJobs.length,
+          pendingAllocation: pendingRequests.length,
+          reportsAwaitingReview: reportsAwaitingReview ?? 0,
+          lowStock,
+          openInvoices,
+        },
+      });
+    }
 
     if (action === "change-password") {
       const currentPassword = String(body.currentPassword ?? "");
@@ -850,6 +1259,33 @@ Deno.serve(async (request: Request) => {
           role: role ?? session.role,
         },
       });
+    }
+
+    if (action === "list-job-templates") {
+      return response({ templates: await listJobTemplates(session) });
+    }
+
+    if (action === "save-job-template") {
+      const items = Array.isArray(body.items) ? body.items : [];
+      const { data: savedTemplateId, error } = await supabase.rpc("gioms_save_job_template", {
+        p_template_id: body.templateId ? String(body.templateId) : null,
+        p_name: String(body.name ?? ""),
+        p_job_type: body.jobType ? String(body.jobType) : null,
+        p_branch: body.branch ? String(body.branch) : null,
+        p_description: String(body.description ?? ""),
+        p_is_active: body.isActive === undefined ? true : Boolean(body.isActive),
+        p_markup_percent: Number(body.markupPercent ?? 0),
+        p_items: items.map((item: any) => ({
+          lineType: String(item?.lineType ?? ""),
+          partId: item?.partId ? String(item.partId) : null,
+          description: String(item?.description ?? ""),
+          quantity: Number(item?.quantity ?? 0),
+          unitPrice: Number(item?.unitPrice ?? 0),
+        })),
+        p_actor: session.sub,
+      });
+      if (error) return response({ error: error.message }, 400);
+      return response({ templateId: savedTemplateId, message: "Template saved." }, body.templateId ? 200 : 201);
     }
 
     if (action === "create-account") {
@@ -967,6 +1403,25 @@ Deno.serve(async (request: Request) => {
       return response({ message: "Temporary password issued.", temporaryPassword });
     }
 
+    if (action === "list-parts") {
+      const { data, error } = await supabase
+        .from("parts")
+        .select("part_id, sku, name, category, unit_of_measure, unit_cost, reorder_threshold")
+        .order("sku");
+      if (error) throw error;
+      return response({
+        parts: (data ?? []).map((part: any) => ({
+          id: part.part_id,
+          sku: part.sku,
+          name: part.name,
+          category: part.category ?? "",
+          unitOfMeasure: part.unit_of_measure,
+          unitCost: Number(part.unit_cost),
+          reorderThreshold: part.reorder_threshold,
+        })),
+      });
+    }
+
     if (action === "list-inventory") {
       const { data, error } = await supabase
         .from("stock")
@@ -990,7 +1445,7 @@ Deno.serve(async (request: Request) => {
       if (!jobNumber) return response({ error: "A work order number is required." }, 400);
       const { data: job, error: jobError } = await supabase
         .from("jobs")
-        .select("job_id, job_number, branch, scheduled_date, scheduled_time, status, parts_status, clients(name, address), job_technicians(is_active, technicians(users(first_name, last_name)))")
+        .select("job_id, job_number, quotation_id, branch, scheduled_date, scheduled_time, status, parts_status, clients(name, address), job_technicians(is_active, technicians(users(first_name, last_name)))")
         .eq("job_number", jobNumber)
         .maybeSingle();
       if (jobError) throw jobError;
@@ -1018,6 +1473,42 @@ Deno.serve(async (request: Request) => {
         const user = technician && (Array.isArray(technician.users) ? technician.users[0] : technician.users);
         return user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "Unknown technician";
       });
+      // The quotation is what the client was sold, so its part lines are the
+      // warehouse's starting point. Aggregated by part in case one part appears
+      // on more than one quoted line.
+      const quotedByPart = new Map<string, { partId: string; description: string; quantity: number }>();
+      let quotationNumber = "";
+      if (job.quotation_id) {
+        const { data: quotation, error: quotationError } = await supabase
+          .from("quotations")
+          .select("quotation_number")
+          .eq("quotation_id", job.quotation_id)
+          .maybeSingle();
+        if (quotationError) throw quotationError;
+        quotationNumber = quotation?.quotation_number ?? "";
+
+        const { data: quotedLines, error: quotedError } = await supabase
+          .from("quotation_line_items")
+          .select("part_id, description, quantity")
+          .eq("quotation_id", job.quotation_id)
+          .eq("line_type", "parts");
+        if (quotedError) throw quotedError;
+        (quotedLines ?? []).forEach((line: any) => {
+          if (!line.part_id) return;
+          const quantity = Number(line.quantity) || 0;
+          const existing = quotedByPart.get(line.part_id);
+          if (existing) {
+            existing.quantity = Math.round((existing.quantity + quantity) * 100) / 100;
+          } else {
+            quotedByPart.set(line.part_id, {
+              partId: line.part_id,
+              description: line.description ?? "",
+              quantity,
+            });
+          }
+        });
+      }
+
       const { data: items, error: inventoryError } = await supabase
         .from("stock")
         .select("stock_id, part_id, branch, quantity_on_hand, quantity_reserved, parts!inner(part_id, sku, name, category, unit_of_measure, reorder_threshold, unit_cost, address, notes)")
@@ -1035,6 +1526,8 @@ Deno.serve(async (request: Request) => {
           technicianName: technicianNames.length ? technicianNames.join(", ") : "Unassigned",
         },
         items: items ?? [],
+        quotationNumber,
+        quotedParts: Array.from(quotedByPart.values()),
       });
     }
 
@@ -1296,7 +1789,423 @@ Deno.serve(async (request: Request) => {
         }, 400);
       }
     }
+
+    if (action === "resubmit-field-report") {
+      const reportId = String(body.reportId ?? "").trim();
+      if (!reportId) return response({ error: "Choose a field report to edit." }, 400);
+
+      // Only the technician who filed the report may correct it; managers return
+      // reports for correction but do not rewrite them.
+      const technicianId = await findCurrentTechnicianId(session);
+      if (!technicianId) {
+        return response({ error: "Only the technician who filed this report can edit it." }, 403);
+      }
+
+      const { data: report, error } = await supabase
+        .from("field_reports")
+        .select("report_id, technician_id, review_status")
+        .eq("report_id", reportId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!report) return response({ error: "Field report not found." }, 404);
+      if (report.technician_id !== technicianId) {
+        return response({ error: "Only the technician who filed this report can edit it." }, 403);
+      }
+      if (report.review_status !== "returned") {
+        return response({ error: "Only a report returned for correction can be edited." }, 409);
+      }
+
+      const workPerformed = String(body.workPerformed ?? "").trim();
+      const serviceDate = String(body.serviceDate ?? "").trim();
+      if (!workPerformed || !serviceDate) {
+        return response({ error: "Describe the work performed and give the service date." }, 400);
+      }
+
+      // Parts and stock movements are deliberately untouched: the first report on
+      // this job already reconciled the reservations, and consuming them twice
+      // would corrupt stock.
+      const { error: updateError } = await supabase
+        .from("field_reports")
+        .update({
+          work_performed: workPerformed,
+          issue_description: String(body.issueDescription ?? "").trim() || null,
+          recommendations: String(body.recommendations ?? "").trim() || null,
+          additional_notes: String(body.additionalNotes ?? "").trim() || null,
+          site_address: String(body.siteAddress ?? "").trim() || null,
+          service_date: serviceDate,
+          time_arrival: String(body.arrivalTime ?? "").trim() || null,
+          client_signoff: Boolean(body.clientSignoff),
+          client_signoff_name: String(body.clientSignoffName ?? "").trim() || null,
+          review_status: "submitted",
+          reviewed_by: null,
+          reviewed_at: null,
+          submitted_at: new Date().toISOString(),
+        })
+        .eq("report_id", reportId);
+      if (updateError) throw updateError;
+
+      return response({
+        message: "Report resubmitted for review.",
+        reviewStatus: "submitted",
+      });
+    }
+
+    if (action === "create-report-upload") {
+      const jobId = String(body.jobId ?? "").trim();
+      const contentType = String(body.contentType ?? "").trim().toLowerCase();
+      const size = Number(body.size);
+      if (!jobId) return response({ error: "Choose a job before attaching an image." }, 400);
+      if (!ATTACHMENT_CONTENT_TYPES.has(contentType)) {
+        return response({ error: "Attach a JPEG, PNG, or WebP image." }, 400);
+      }
+      if (!Number.isFinite(size) || size <= 0 || size > MAX_ATTACHMENT_BYTES) {
+        return response({ error: "Each image must be 10 MB or smaller." }, 400);
+      }
+
+      const technicianId = await findCurrentTechnicianId(session);
+      if (!technicianId) {
+        return response({ error: "Only an assigned technician can attach images." }, 403);
+      }
+      const { data: assignment, error: assignmentError } = await supabase
+        .from("job_technicians")
+        .select("job_id")
+        .eq("job_id", jobId)
+        .eq("technician_id", technicianId)
+        .eq("is_active", true)
+        .maybeSingle();
+      if (assignmentError) throw assignmentError;
+      if (!assignment) return response({ error: "You are not assigned to this job." }, 403);
+
+      const path = `reports/${jobId}/${session.sub}/${crypto.randomUUID()}.${attachmentExtension(contentType)}`;
+      const { data: signed, error: signError } = await supabase.storage
+        .from(ATTACHMENT_BUCKET)
+        .createSignedUploadUrl(path);
+      if (signError) throw signError;
+      if (!signed?.token) return response({ error: "Could not prepare the upload." }, 502);
+
+      return response({ path, token: signed.token, signedUrl: signed.signedUrl ?? "" });
+    }
+
+    if (action === "discard-report-upload") {
+      const path = String(body.path ?? "").trim();
+      if (!ATTACHMENT_PATH_PATTERN.test(path) || !path.includes(`/${String(session.sub)}/`)) {
+        return response({ error: "That upload does not belong to you." }, 403);
+      }
+      const { data: attached, error: attachedError } = await supabase
+        .from("report_attachments")
+        .select("attachment_id")
+        .eq("file_url", path)
+        .limit(1);
+      if (attachedError) throw attachedError;
+      if (attached?.length) {
+        return response({ error: "That image is already part of a report." }, 409);
+      }
+      const { error: removeError } = await supabase.storage.from(ATTACHMENT_BUCKET).remove([path]);
+      if (removeError) throw removeError;
+      return response({ message: "Upload discarded." });
+    }
+
+    if (action === "migrate-report-attachments") {
+      // One-off: move legacy base64 rows into the bucket so the column stores paths.
+      const { data: legacy, error: legacyError } = await supabase
+        .from("report_attachments")
+        .select("attachment_id, file_url, report_id, field_reports!inner(job_id, technician_id)")
+        .like("file_url", "data:%")
+        .limit(10);
+      if (legacyError) throw legacyError;
+
+      let migrated = 0;
+      let failed = 0;
+
+      for (const row of legacy ?? []) {
+        const record = row as any;
+        try {
+          const match = /^data:(image\/[a-z+]+);base64,(.*)$/is.exec(String(record.file_url));
+          if (!match) {
+            failed += 1;
+            continue;
+          }
+          const contentType = match[1].toLowerCase();
+          const report = Array.isArray(record.field_reports)
+            ? record.field_reports[0]
+            : record.field_reports;
+          const { data: technician, error: technicianError } = await supabase
+            .from("technicians")
+            .select("user_id")
+            .eq("technician_id", report?.technician_id ?? "")
+            .maybeSingle();
+          if (technicianError) throw technicianError;
+
+          const bytes = Uint8Array.from(atob(match[2]), (character) => character.charCodeAt(0));
+          const owner = technician?.user_id ?? "00000000-0000-0000-0000-000000000000";
+          const path = `reports/${report?.job_id}/${owner}/${crypto.randomUUID()}.${attachmentExtension(contentType)}`;
+          const { error: uploadError } = await supabase.storage
+            .from(ATTACHMENT_BUCKET)
+            .upload(path, bytes, { contentType, upsert: false });
+          if (uploadError) throw uploadError;
+
+          const { error: updateError } = await supabase
+            .from("report_attachments")
+            .update({ file_url: path })
+            .eq("attachment_id", record.attachment_id);
+          if (updateError) throw updateError;
+          migrated += 1;
+        } catch (error) {
+          console.error("Attachment migration failed for", record.attachment_id, error);
+          failed += 1;
+        }
+      }
+
+      const { count: remaining, error: remainingError } = await supabase
+        .from("report_attachments")
+        .select("attachment_id", { count: "exact", head: true })
+        .like("file_url", "data:%");
+      if (remainingError) throw remainingError;
+
+      return response({ migrated, failed, remaining: remaining ?? 0 });
+    }
     
+
+    if (action === "list-invoices") {
+      const first = (value: any) => (Array.isArray(value) ? value[0] : value);
+      const { data: invoices, error } = await supabase
+        .from("invoices")
+        .select(`
+          invoice_id, invoice_number, status, issue_date, due_date, total_amount,
+          clients(name, company_name),
+          jobs!invoices_job_id_fkey(job_number, job_type, branch),
+          quotations(quotation_number),
+          field_reports!invoices_report_id_fkey(report_number, service_date),
+          invoice_line_items(line_item_id, description, quantity, unit_price, line_total),
+          payments(payment_id, amount, payment_date, method, created_at)
+        `)
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+
+      const today = new Date().toISOString().slice(0, 10);
+      return response({
+        invoices: (invoices ?? []).map((invoice: any) => {
+          const total = Number(invoice.total_amount) || 0;
+          const payments = (Array.isArray(invoice.payments) ? invoice.payments : [])
+            .map((payment: any) => ({
+              id: payment.payment_id,
+              amount: Number(payment.amount) || 0,
+              date: String(payment.payment_date),
+              method: payment.method,
+              createdAt: payment.created_at,
+            }))
+            .sort((left: any, right: any) => (left.date < right.date ? 1 : left.date > right.date ? -1 : 0));
+          const paid =
+            Math.round(payments.reduce((sum: number, payment: any) => sum + payment.amount, 0) * 100) / 100;
+          const balance = Math.round((total - paid) * 100) / 100;
+          // "overdue" is derived rather than stored: nothing runs on a schedule to
+          // flip the column, so a stale status would otherwise show forever.
+          let status = invoice.status;
+          if (status !== "cancelled" && balance <= 0) status = "paid";
+          else if (status === "pending" && invoice.due_date && String(invoice.due_date) < today) status = "overdue";
+
+          const client = first(invoice.clients);
+          const job = first(invoice.jobs);
+          const quotation = first(invoice.quotations);
+          const report = first(invoice.field_reports);
+          return {
+            id: invoice.invoice_id,
+            invoiceNumber: invoice.invoice_number,
+            status,
+            storedStatus: invoice.status,
+            issueDate: String(invoice.issue_date),
+            dueDate: invoice.due_date ? String(invoice.due_date) : null,
+            totalAmount: total,
+            paidAmount: paid,
+            balance,
+            clientName: client?.company_name || client?.name || "Client",
+            jobNumber: job?.job_number ?? "",
+            jobType: job?.job_type ?? "",
+            quotationNumber: quotation?.quotation_number ?? "",
+            reportNumber: report?.report_number ?? "",
+            serviceDate: report?.service_date ? String(report.service_date) : null,
+            lines: (Array.isArray(invoice.invoice_line_items) ? invoice.invoice_line_items : []).map(
+              (line: any) => ({
+                id: line.line_item_id,
+                description: line.description,
+                quantity: Number(line.quantity),
+                unitPrice: Number(line.unit_price),
+                lineTotal: Number(line.line_total),
+              }),
+            ),
+            payments,
+          };
+        }),
+      });
+    }
+
+    if (action === "list-invoice-candidates") {
+      const first = (value: any) => (Array.isArray(value) ? value[0] : value);
+      const { data: reports, error } = await supabase
+        .from("field_reports")
+        .select(`
+          report_id, report_number, service_date, submitted_at, reviewed_at,
+          technicians!inner(users(first_name, last_name)),
+          jobs!field_reports_job_id_fkey(job_id, job_number, job_type, branch, site_address, client_id, quotation_id, clients(name, company_name))
+        `)
+        .eq("review_status", "approved")
+        .order("submitted_at", { ascending: false });
+      if (error) throw error;
+
+      const { data: invoiced, error: invoicedError } = await supabase
+        .from("invoices")
+        .select("job_id")
+        .neq("status", "cancelled");
+      if (invoicedError) throw invoicedError;
+      const invoicedJobs = new Set((invoiced ?? []).map((row: any) => row.job_id));
+
+      const technicianNameOf = (report: any) => {
+        const technician = first(report.technicians);
+        const user = technician ? first(technician.users) : null;
+        return user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "Technician";
+      };
+
+      // Billing references exactly one report per job: the earliest approved.
+      // Approving a second technician's report must not add a second candidate.
+      const jobReports = new Map<string, any[]>();
+      (reports ?? []).forEach((report: any) => {
+        const job = first(report.jobs);
+        if (!job) return;
+        const entries = jobReports.get(job.job_id) ?? [];
+        entries.push({ report, job });
+        jobReports.set(job.job_id, entries);
+      });
+
+      const quotationIds = Array.from(
+        new Set(
+          [...jobReports.values()]
+            .map((entries) => entries[0]?.job?.quotation_id)
+            .filter(Boolean),
+        ),
+      );
+      let quoteLines: any[] = [];
+      if (quotationIds.length) {
+        const { data: lines, error: linesError } = await supabase
+          .from("quotation_line_items")
+          .select("quotation_id, line_type, description, quantity, unit_price, line_total")
+          .in("quotation_id", quotationIds)
+          .order("line_item_id");
+        if (linesError) throw linesError;
+        quoteLines = lines ?? [];
+      }
+
+      const candidates = [...jobReports.entries()]
+        .filter(([jobId]) => !invoicedJobs.has(jobId))
+        .map(([, entries]) => {
+          const ordered = entries.slice().sort((left, right) => {
+            const leftKey = left.report.reviewed_at ?? left.report.submitted_at ?? "";
+            const rightKey = right.report.reviewed_at ?? right.report.submitted_at ?? "";
+            if (leftKey < rightKey) return -1;
+            if (leftKey > rightKey) return 1;
+            return String(left.report.report_id).localeCompare(String(right.report.report_id));
+          });
+          const primary = ordered[0];
+          const job = primary.job;
+          const client = first(job.clients);
+          const lines = quoteLines.filter((line: any) => line.quotation_id === job.quotation_id);
+          return {
+            reportId: primary.report.report_id,
+            reportNumber: primary.report.report_number,
+            serviceDate: String(primary.report.service_date),
+            submittedAt: primary.report.submitted_at,
+            reviewedAt: primary.report.reviewed_at,
+            reportCount: ordered.length,
+            reports: ordered.map((entry: any) => ({
+              reportId: entry.report.report_id,
+              reportNumber: entry.report.report_number,
+              technicianName: technicianNameOf(entry.report),
+              reviewedAt: entry.report.reviewed_at,
+            })),
+            jobId: job.job_id,
+            jobNumber: job.job_number,
+            jobType: job.job_type,
+            branch: job.branch,
+            siteAddress: job.site_address ?? "",
+            quotationId: job.quotation_id ?? "",
+            clientName: client?.company_name || client?.name || "Client",
+            lines: lines.map((line: any) => ({
+              lineType: line.line_type,
+              description: line.description,
+              quantity: Number(line.quantity),
+              unitPrice: Number(line.unit_price),
+              lineTotal: Number(line.line_total),
+            })),
+            quotedTotal:
+              Math.round(
+                lines.reduce((sum: number, line: any) => sum + Number(line.line_total || 0), 0) * 100,
+              ) / 100,
+          };
+        });
+
+      return response({ candidates });
+    }
+
+    if (action === "create-invoice") {
+      const reportId = String(body.reportId ?? "").trim();
+      const dueDate = body.dueDate ? String(body.dueDate) : null;
+      const extras = Array.isArray(body.extras) ? body.extras : [];
+      if (!reportId) return response({ error: "Choose an approved field report to invoice." }, 400);
+      if (dueDate && !/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+        return response({ error: "The due date is not a valid date." }, 400);
+      }
+      if (extras.length > 25) return response({ error: "Add at most 25 extra lines." }, 400);
+
+      // jsonb_to_recordset in the RPC expects exactly these keys.
+      const extraLines = extras.map((extra: any) => ({
+        description: String(extra?.description ?? "").trim(),
+        quantity: Number(extra?.quantity),
+        unit_price: Number(extra?.unitPrice),
+      }));
+      if (extraLines.some((line: any) => !line.description)) {
+        return response({ error: "Every extra line needs a description." }, 400);
+      }
+      if (extraLines.some((line: any) => !Number.isFinite(line.quantity) || line.quantity <= 0)) {
+        return response({ error: "Extra line quantities must be greater than zero." }, 400);
+      }
+      if (extraLines.some((line: any) => !Number.isFinite(line.unit_price) || line.unit_price < 0)) {
+        return response({ error: "Extra line prices cannot be negative." }, 400);
+      }
+
+      const { data: invoice, error } = await supabase.rpc("gioms_create_invoice_from_report", {
+        p_report_id: reportId,
+        p_due_date: dueDate,
+        p_extra_lines: extraLines,
+      });
+      if (error) return response({ error: error.message }, 409);
+      return response(invoice, 201);
+    }
+
+    if (action === "record-payment") {
+      const invoiceId = String(body.invoiceId ?? "").trim();
+      const amount = Number(body.amount);
+      const method = String(body.method ?? "").trim();
+      const paidOn = body.paymentDate ? String(body.paymentDate) : null;
+      if (!invoiceId) return response({ error: "Choose an invoice." }, 400);
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return response({ error: "Enter a payment greater than zero." }, 400);
+      }
+      if (!["cash", "check", "bank_transfer", "online"].includes(method)) {
+        return response({ error: "Choose a valid payment method." }, 400);
+      }
+      if (paidOn && !/^\d{4}-\d{2}-\d{2}$/.test(paidOn)) {
+        return response({ error: "The payment date is not a valid date." }, 400);
+      }
+
+      const { data: payment, error } = await supabase.rpc("gioms_record_invoice_payment", {
+        p_invoice_id: invoiceId,
+        p_amount: amount,
+        p_method: method,
+        p_paid_on: paidOn,
+        p_actor: String(session.sub),
+      });
+      if (error) return response({ error: error.message }, 409);
+      return response(payment);
+    }
 
     if (action === "get-schedule") {
       const schedules = await listSchedules();
@@ -1367,6 +2276,60 @@ Deno.serve(async (request: Request) => {
         .eq("job_id", job.job_id);
       if (updateError) throw updateError;
       return response({ message: "Assignment confirmed.", confirmedAt });
+    }
+
+    if (action === "list-clients") {
+      const search = String(body.search ?? "").trim().replace(/[(),%]/g, " ").trim();
+      let clientQuery = supabase
+        .from("clients")
+        .select("client_id, name, first_name, last_name, company_name, client_type, phone, email, address, branch_served")
+        .order("name")
+        .limit(50);
+      if (search) {
+        clientQuery = clientQuery.or(`name.ilike.%${search}%,phone.ilike.%${search}%,email.ilike.%${search}%`);
+      }
+      const { data: clients, error: clientError } = await clientQuery;
+      if (clientError) throw clientError;
+      return response({
+        clients: (clients ?? []).map((client: any) => ({
+          id: client.client_id,
+          name: client.name || [client.first_name, client.last_name].filter(Boolean).join(" ") || "Unnamed client",
+          clientType: client.client_type,
+          companyName: client.company_name ?? "",
+          firstName: client.first_name ?? "",
+          lastName: client.last_name ?? "",
+          phone: client.phone ?? "",
+          email: client.email ?? "",
+          address: client.address ?? "",
+          branch: client.branch_served,
+        })),
+      });
+    }
+
+    if (action === "create-job-from-template") {
+      const technicianIds = Array.isArray(body.technicianIds)
+        ? [...new Set<string>(body.technicianIds.map(String).filter(Boolean))]
+        : [];
+      const { data: created, error: createError } = await supabase.rpc("gioms_create_job_from_template", {
+        p_client_id: body.clientId ? String(body.clientId) : null,
+        p_first_name: String(body.firstName ?? ""),
+        p_last_name: String(body.lastName ?? ""),
+        p_client_type: String(body.clientType ?? ""),
+        p_company_name: String(body.companyName ?? ""),
+        p_email: String(body.email ?? ""),
+        p_phone: String(body.phone ?? ""),
+        p_site_address: String(body.siteAddress ?? ""),
+        p_template_id: body.templateId ? String(body.templateId) : null,
+        p_accepted_by_name: String(body.acceptedByName ?? ""),
+        p_date: body.date ? String(body.date) : null,
+        p_start_time: body.startTime ? String(body.startTime) : null,
+        p_end_time: body.endTime ? String(body.endTime) : null,
+        p_branch: body.branch ? String(body.branch) : null,
+        p_technician_ids: technicianIds.length ? technicianIds : null,
+        p_actor: session.sub,
+      });
+      if (createError) return response({ error: createError.message }, 400);
+      return response({ job: created }, 201);
     }
 
     if (action === "create-schedule") {
