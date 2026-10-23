@@ -1,7 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
-import { callAuthFunction, getSession, setSession } from "../lib/auth.js";
+import { callAuthFunction, getSession, roleTitleFor, setSession } from "../lib/auth.js";
+import { supabase } from "../lib/supabaseClient.js";
+import {
+  PROFILE_PHOTO_MAX_BYTES,
+  initialsFor,
+  prepareProfilePhoto,
+} from "../lib/images.js";
 
 function splitDisplayName(displayName = "") {
   const nameParts = displayName.trim().split(/\s+/).filter(Boolean);
@@ -13,55 +19,143 @@ function splitDisplayName(displayName = "") {
 
 function Settings() {
   const sessionUser = getSession()?.user;
-  const profilePhotoKey = sessionUser?.id
-    ? `profilePhoto:${sessionUser.id}`
-    : "profilePhoto";
   const [profile, setProfile] = useState(() => ({
     ...splitDisplayName(sessionUser?.name || ""),
     email: sessionUser?.email || "",
     phone: sessionUser?.phone || "",
-    title: sessionUser?.title || "",
+    title: roleTitleFor(sessionUser?.role),
   }));
+  const [originalEmail, setOriginalEmail] = useState(sessionUser?.email || "");
+  const [branch, setBranch] = useState(sessionUser?.branch || "");
+  const [role, setRole] = useState(sessionUser?.role || "");
+  const [profilePhoto, setProfilePhoto] = useState(sessionUser?.photoUrl || "");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [formError, setFormError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
   const [profileMessage, setProfileMessage] = useState("");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
-  const [profilePhoto, setProfilePhoto] = useState(
-    () => localStorage.getItem(profilePhotoKey) || "",
-  );
   const [showPasswords, setShowPasswords] = useState(false);
 
-  const handlePhotoChange = (event) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  // The form loads from the database, not from the session snapshot, so a stale
+  // login cannot make a save look as though it was ignored.
+  useEffect(() => {
+    let isMounted = true;
+    callAuthFunction("get-profile")
+      .then(({ profile: saved }) => {
+        if (!isMounted || !saved) return;
+        const fallbackName = splitDisplayName(saved.name || "");
+        setProfile({
+          firstName: saved.firstName ?? fallbackName.firstName,
+          lastName: saved.lastName ?? fallbackName.lastName,
+          email: saved.email ?? "",
+          phone: saved.phone ?? "",
+          title: saved.title ?? "",
+        });
+        setOriginalEmail(saved.email ?? "");
+        setBranch(saved.branch ?? "");
+        setRole(saved.role ?? "");
+        setProfilePhoto(saved.photoUrl ?? "");
 
-    if (!file.type.startsWith("image/")) {
-      setProfileMessage("Please choose an image file.");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const photo = String(reader.result);
-      setProfilePhoto(photo);
-      localStorage.setItem(profilePhotoKey, photo);
-      window.dispatchEvent(new Event("profile-updated"));
-      setProfileMessage("Profile photo updated.");
+        const currentSession = getSession();
+        if (currentSession?.user) {
+          setSession({
+            ...currentSession,
+            user: {
+              ...currentSession.user,
+              name: saved.name ?? currentSession.user.name,
+              email: saved.email ?? currentSession.user.email,
+              phone: saved.phone ?? "",
+              title: saved.title ?? "",
+              photoUrl: saved.photoUrl ?? "",
+            },
+          });
+          window.dispatchEvent(new Event("account-updated"));
+        }
+      })
+      .catch((error) => {
+        if (isMounted) setFormError(error.message);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingProfile(false);
+      });
+    return () => {
+      isMounted = false;
     };
-    reader.readAsDataURL(file);
+  }, []);
+
+  function syncSessionPhoto(photoUrl) {
+    const currentSession = getSession();
+    if (!currentSession?.user) return;
+    setSession({
+      ...currentSession,
+      user: { ...currentSession.user, photoUrl },
+    });
+    window.dispatchEvent(new Event("account-updated"));
+  }
+
+  const handlePhotoChange = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setFormError("");
+    setProfileMessage("");
+    setIsUploadingPhoto(true);
+    try {
+      const prepared = await prepareProfilePhoto(file);
+      if (prepared.size > PROFILE_PHOTO_MAX_BYTES) {
+        throw new Error("The photo must be 5 MB or smaller.");
+      }
+      const { path, token } = await callAuthFunction(
+        "create-profile-photo-upload",
+        { contentType: prepared.type, size: prepared.size },
+      );
+      const { error } = await supabase.storage
+        .from("profile-photos")
+        .uploadToSignedUrl(path, token, prepared, {
+          contentType: prepared.type,
+        });
+      if (error) throw error;
+      const { photoUrl } = await callAuthFunction("update-profile-photo", {
+        path,
+      });
+      setProfilePhoto(photoUrl);
+      syncSessionPhoto(photoUrl);
+      setProfileMessage("Profile photo updated.");
+    } catch (error) {
+      setFormError(error.message);
+    } finally {
+      setIsUploadingPhoto(false);
+    }
   };
 
-  const handlePhotoRemove = () => {
-    setProfilePhoto("");
-    localStorage.removeItem(profilePhotoKey);
-    window.dispatchEvent(new Event("profile-updated"));
-    setProfileMessage("Profile photo removed.");
+  const handlePhotoRemove = async () => {
+    setFormError("");
+    setProfileMessage("");
+    setIsUploadingPhoto(true);
+    try {
+      await callAuthFunction("remove-profile-photo");
+      setProfilePhoto("");
+      syncSessionPhoto("");
+      setProfileMessage("Profile photo removed.");
+    } catch (error) {
+      setFormError(error.message);
+    } finally {
+      setIsUploadingPhoto(false);
+    }
   };
 
   const handleProfileSave = async (event) => {
     event.preventDefault();
     setProfileMessage("");
     setFormError("");
+    const emailChanged =
+      profile.email.trim().toLowerCase() !== originalEmail.trim().toLowerCase();
+    if (emailChanged && !currentPassword) {
+      setFormError("Enter your current password to change your email address.");
+      return;
+    }
     setIsSavingProfile(true);
     try {
       const { profile: savedProfile } = await callAuthFunction("update-profile", {
@@ -69,7 +163,7 @@ function Settings() {
         lastName: profile.lastName,
         email: profile.email,
         phone: profile.phone,
-        title: profile.title,
+        ...(emailChanged ? { currentPassword } : {}),
       });
 
       setProfile({
@@ -78,6 +172,11 @@ function Settings() {
         phone: savedProfile.phone,
         title: savedProfile.title,
       });
+      setOriginalEmail(savedProfile.email);
+      setCurrentPassword("");
+      setBranch(savedProfile.branch ?? branch);
+      setRole(savedProfile.role ?? role);
+      setProfilePhoto(savedProfile.photoUrl ?? "");
 
       const currentSession = getSession();
       if (currentSession?.user) {
@@ -89,6 +188,7 @@ function Settings() {
             email: savedProfile.email,
             phone: savedProfile.phone,
             title: savedProfile.title,
+            photoUrl: savedProfile.photoUrl ?? "",
           },
         });
         window.dispatchEvent(new Event("account-updated"));
@@ -128,6 +228,9 @@ function Settings() {
       setSuccessMessage("");
     }
   };
+
+  const emailChanged =
+    profile.email.trim().toLowerCase() !== originalEmail.trim().toLowerCase();
 
   return (
     <main className="flex h-screen overflow-hidden bg-[#202123] font-sans text-[#174f9a] max-[1024px]:block">
@@ -179,7 +282,7 @@ function Settings() {
                     />
                   ) : (
                     <span className="grid h-16 w-16 flex-none place-items-center rounded-full bg-[#ff4825] text-[18px] font-bold text-white">
-                      RJ
+                      {initialsFor(profile.firstName, profile.lastName, role) || "?"}
                     </span>
                   )}
                   <div className="min-w-0">
@@ -187,27 +290,32 @@ function Settings() {
                       Profile photo
                     </p>
                     <p className="m-0 mt-1 text-[11px] text-[#89939b]">
-                      JPG, PNG, or GIF. Choose a square image for the best
-                      result.
+                      JPEG, PNG, or WebP, up to 5 MB. Square images look best.
                     </p>
                     <div className="mt-2 flex flex-wrap gap-2">
-                      <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-[5px] bg-[#1250a0] px-3 text-[11px] font-bold text-white transition hover:bg-[#0e4389]">
+                      <label
+                        className={`inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-[5px] bg-[#1250a0] px-3 text-[11px] font-bold text-white transition hover:bg-[#0e4389] ${
+                          isUploadingPhoto ? "pointer-events-none opacity-60" : ""
+                        }`}
+                      >
                         <span className="material-symbols-outlined text-[16px]">
                           upload
                         </span>
-                        Upload photo
+                        {isUploadingPhoto ? "Uploading..." : "Upload photo"}
                         <input
                           className="sr-only"
                           type="file"
-                          accept="image/*"
+                          accept="image/jpeg,image/png,image/webp"
+                          disabled={isUploadingPhoto}
                           onChange={handlePhotoChange}
                         />
                       </label>
                       {profilePhoto && (
                         <button
-                          className="h-8 rounded-[5px] border border-[#d6dee6] bg-white px-3 text-[11px] font-semibold text-[#68798a] transition hover:border-[#e05b45] hover:text-[#e05b45]"
+                          className="h-8 rounded-[5px] border border-[#d6dee6] bg-white px-3 text-[11px] font-semibold text-[#68798a] transition hover:border-[#e05b45] hover:text-[#e05b45] disabled:opacity-50"
                           onClick={handlePhotoRemove}
                           type="button"
+                          disabled={isUploadingPhoto}
                         >
                           Remove
                         </button>
@@ -252,6 +360,25 @@ function Settings() {
                     required
                   />
                 </label>
+                {emailChanged && (
+                  <label className="col-span-full flex flex-col gap-1.5 rounded-[7px] border border-[#f0dcb4] bg-[#fffbf2] p-3 text-[12px] font-semibold text-[#7a5a12]">
+                    Current password
+                    <input
+                      className="h-11 rounded-[6px] border border-[#e6d3a6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
+                      type="password"
+                      name="currentPassword"
+                      autoComplete="current-password"
+                      value={currentPassword}
+                      onChange={(event) => setCurrentPassword(event.target.value)}
+                      placeholder="Required to change your sign-in email"
+                      required
+                    />
+                    <span className="text-[10px] font-normal text-[#8a6a1f]">
+                      Your email is how you sign in, so changing it needs your
+                      current password.
+                    </span>
+                  </label>
+                )}
                 <label className="flex flex-col gap-1.5 text-[12px] font-semibold text-[#45515c]">
                   Phone number
                   <input
@@ -268,14 +395,43 @@ function Settings() {
                 <label className="flex flex-col gap-1.5 text-[12px] font-semibold text-[#45515c]">
                   Job title
                   <input
-                    className="h-11 rounded-[6px] border border-[#d6dee6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15"
+                    className="h-11 rounded-[6px] border border-[#d6dee6] bg-[#f2f4f6] px-3 text-[13px] text-[#5e6b78] outline-none"
                     name="title"
                     value={profile.title}
-                    onChange={(event) =>
-                      setProfile({ ...profile, title: event.target.value })
-                    }
-                    placeholder="e.g. Service Manager"
+                    readOnly
+                    disabled
                   />
+                  <span className="text-[10px] font-normal text-[#8b949c]">
+                    Set automatically from your role.
+                  </span>
+                </label>
+                <label className="flex flex-col gap-1.5 text-[12px] font-semibold text-[#45515c]">
+                  Branch
+                  <input
+                    className="h-11 rounded-[6px] border border-[#d6dee6] bg-[#f2f4f6] px-3 text-[13px] text-[#5e6b78] outline-none"
+                    value={
+                      branch
+                        ? branch.replace(/^./, (letter) => letter.toUpperCase())
+                        : ""
+                    }
+                    readOnly
+                    disabled
+                  />
+                  <span className="text-[10px] font-normal text-[#8b949c]">
+                    Managed by an administrator.
+                  </span>
+                </label>
+                <label className="flex flex-col gap-1.5 text-[12px] font-semibold text-[#45515c]">
+                  Role
+                  <input
+                    className="h-11 rounded-[6px] border border-[#d6dee6] bg-[#f2f4f6] px-3 text-[13px] text-[#5e6b78] outline-none"
+                    value={role}
+                    readOnly
+                    disabled
+                  />
+                  <span className="text-[10px] font-normal text-[#8b949c]">
+                    Your access follows this role.
+                  </span>
                 </label>
                 {profileMessage && (
                   <p
@@ -289,12 +445,16 @@ function Settings() {
                   <button
                     className="col-start-2 flex h-11 w-full items-center justify-center gap-2 rounded-[6px] border-0 bg-[#1250a0] px-4 text-[13px] font-bold text-white transition hover:bg-[#0e4389] disabled:cursor-wait disabled:opacity-60 max-[620px]:col-start-1"
                     type="submit"
-                    disabled={isSavingProfile}
+                    disabled={isSavingProfile || isLoadingProfile}
                   >
                     <span className="material-symbols-outlined text-[18px]">
                       save
                     </span>
-                    {isSavingProfile ? "Saving..." : "Save personal information"}
+                    {isSavingProfile
+                      ? "Saving..."
+                      : isLoadingProfile
+                        ? "Loading profile..."
+                        : "Save personal information"}
                   </button>
                 </div>
               </form>

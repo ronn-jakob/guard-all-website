@@ -43,6 +43,7 @@ function JobFormPage() {
   const isEdit = Boolean(order);
   const sessionUser = getSession()?.user;
   const defaultBranch = sessionUser?.branch === "cebu" ? "cebu" : "makati";
+  const isAdmin = sessionUser?.role === "Admin";
 
   const [loadError, setLoadError] = useState("");
   const [saveError, setSaveError] = useState("");
@@ -86,10 +87,16 @@ function JobFormPage() {
   const [selectedTechnicians, setSelectedTechnicians] = useState([]);
 
   // Review
-  const [acceptedByName, setAcceptedByName] = useState("");
+  // The quotation's representative is the signed-in account. The backend derives
+  // the same value from the session, so this is display-only.
+  const acceptedByName = sessionUser?.name ?? "";
 
   // Edit mode
   const [editJob, setEditJob] = useState(null);
+  // A draft job is editable, branch included, until its assignment is confirmed.
+  const isDraftJob = isEdit && Boolean(editJob) && !editJob.assignmentConfirmedAt;
+  // A confirmed job is final: the page is read-only and the backend refuses edits.
+  const isLockedJob = isEdit && Boolean(editJob?.assignmentConfirmedAt);
 
   useEffect(() => {
     let alive = true;
@@ -249,7 +256,9 @@ function JobFormPage() {
       }
     }
     if (!isEdit && !acceptedByName.trim()) {
-      setSaveError("Record who accepted the quotation.");
+      setSaveError(
+        "Your account has no name on record. Update your profile before creating a quote.",
+      );
       return;
     }
 
@@ -263,6 +272,7 @@ function JobFormPage() {
           startTime,
           endTime,
           branch,
+          siteAddress,
           technicianIds: selectedTechnicians,
         });
       } else {
@@ -276,7 +286,6 @@ function JobFormPage() {
           phone: newClient.phone,
           siteAddress,
           templateId,
-          acceptedByName,
           date,
           startTime,
           endTime,
@@ -308,7 +317,9 @@ function JobFormPage() {
               </h1>
               <p className="mb-0 mt-2 text-[14px] text-[#8b949c] max-[620px]:text-[9px]">
                 {isEdit
-                  ? "Branch and service type are fixed by the accepted quotation."
+                  ? isLockedJob
+                    ? "This job is confirmed and can no longer be edited."
+                    : "Editable until the draft is confirmed."
                   : "Price the job from a standard template, then schedule it."}
               </p>
             </div>
@@ -337,7 +348,11 @@ function JobFormPage() {
             onSubmit={handleSubmit}
             className="grid grid-cols-[minmax(0,1fr)_320px] items-start gap-4 max-[1100px]:grid-cols-1"
           >
-            <div className="space-y-4">
+            <div
+              className={
+                isLockedJob ? "space-y-4 pointer-events-none opacity-60" : "space-y-4"
+              }
+            >
               {/* 1. Client */}
               <section className={sectionClass}>
                 <h2 className="m-0 text-[15px] font-bold text-[#263747]">
@@ -613,7 +628,7 @@ function JobFormPage() {
                     <select
                       className={`${fieldClass} disabled:bg-[#f2f4f6]`}
                       value={branch}
-                      disabled={isEdit}
+                      disabled={!isAdmin || (isEdit && !isDraftJob)}
                       onChange={(event) => setBranch(event.target.value)}
                     >
                       {branches.map((option) => (
@@ -622,9 +637,19 @@ function JobFormPage() {
                         </option>
                       ))}
                     </select>
-                    {isEdit && (
+                    {!isAdmin && (
+                      <span className="mt-1 text-[10px] font-normal text-[#8b949c]">
+                        Assigned to your account branch. Ask an Admin to change it.
+                      </span>
+                    )}
+                    {isAdmin && isEdit && !isDraftJob && (
                       <span className="mt-1 text-[10px] font-normal text-[#8b949c]">
                         Fixed by the accepted quotation
+                      </span>
+                    )}
+                    {isAdmin && isDraftJob && (
+                      <span className="mt-1 text-[10px] font-normal text-[#8b949c]">
+                        Editable until the draft is confirmed
                       </span>
                     )}
                   </label>
@@ -756,7 +781,11 @@ function JobFormPage() {
             <aside className="sticky top-4 space-y-3 rounded-[10px] border border-[#dfe6ec] bg-white p-5 shadow-[0_3px_8px_rgb(31_59_82_/_10%)] max-[1100px]:static">
               <div>
                 <p className="m-0 text-[10px] font-bold uppercase tracking-[.1em] text-[#818b94]">
-                  {isEdit ? "Current job" : "Quote summary"}
+                  {isEdit
+                    ? isDraftJob
+                      ? "Draft job"
+                      : "Current job"
+                    : "Quote summary"}
                 </p>
                 <h2 className="m-0 mt-1 text-[16px] font-bold text-[#263747]">
                   {isEdit
@@ -772,7 +801,14 @@ function JobFormPage() {
                     <strong>{branch.replace(/^./, (l) => l.toUpperCase())}</strong>
                   </p>
                   <p className="m-0">
-                    Quotation: <strong>{editJob?.quotationId || "—"}</strong>
+                    Quotation:{" "}
+                    <strong>
+                      {editJob?.quotationNumber || editJob?.quotationId || "—"}
+                    </strong>
+                  </p>
+                  <p className="m-0">
+                    Representative:{" "}
+                    <strong>{editJob?.acceptedByName || "—"}</strong>
                   </p>
                 </div>
               ) : selectedTemplate ? (
@@ -806,19 +842,17 @@ function JobFormPage() {
               )}
 
               {!isEdit && (
-                <label className={labelClass}>
-                  Accepted by
-                  <input
-                    className={fieldClass}
-                    value={acceptedByName}
-                    onChange={(event) => setAcceptedByName(event.target.value)}
-                    placeholder="Client representative"
-                    required
-                  />
-                  <span className="mt-1 text-[10px] font-normal text-[#8b949c]">
-                    Recorded on the quotation
+                <div className="border-t border-[#e1e6eb] pt-2">
+                  <div className="flex items-baseline justify-between gap-2 text-[12px]">
+                    <span className="text-[#68798a]">Representative</span>
+                    <strong className="min-w-0 truncate text-right text-[#263747]">
+                      {acceptedByName || "Not set"}
+                    </strong>
+                  </div>
+                  <span className="mt-1 block text-[10px] text-[#8b949c]">
+                    Taken from your account and recorded on the quotation.
                   </span>
-                </label>
+                </div>
               )}
 
               {saveError && (
@@ -832,7 +866,7 @@ function JobFormPage() {
 
               <button
                 type="submit"
-                disabled={isSaving}
+                disabled={isSaving || isLockedJob}
                 className="flex w-full items-center justify-center gap-2 rounded-[6px] bg-[#1250a0] py-3 text-[12px] font-bold text-white hover:bg-[#0e4388] disabled:cursor-wait disabled:opacity-60"
               >
                 <span className="material-symbols-outlined text-[18px]">
@@ -840,9 +874,11 @@ function JobFormPage() {
                 </span>
                 {isSaving
                   ? "Saving..."
-                  : isEdit
-                    ? "Save changes"
-                    : "Create job"}
+                  : isLockedJob
+                    ? "Job is locked"
+                    : isEdit
+                      ? "Save changes"
+                      : "Create job"}
               </button>
 
               <button

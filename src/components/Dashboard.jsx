@@ -18,12 +18,6 @@ const formatShortDate = (value) =>
       })
     : "";
 
-const partsBadge = (partsStatus) => {
-  if (partsStatus === "confirmed") return "Parts ready";
-  if (partsStatus === "not_required") return "No parts";
-  return "Awaiting parts";
-};
-
 const stockStatus = (partsStatus) => {
   if (partsStatus === "confirmed") return "Available";
   if (partsStatus === "not_required") return "Not needed";
@@ -31,7 +25,7 @@ const stockStatus = (partsStatus) => {
 };
 
 const row =
-  "grid grid-cols-[1.05fr_1.42fr_1.18fr_1fr_28px] items-center px-5 max-[620px]:grid-cols-[1fr_1.5fr_1.2fr_22px] max-[620px]:px-[9px]";
+  "grid grid-cols-[1.05fr_1.42fr_1.18fr_1fr_36px] items-center px-5 max-[620px]:grid-cols-[1fr_1.5fr_1.2fr_24px] max-[620px]:px-[9px]";
 const label =
   "m-0 text-[10px] font-bold uppercase tracking-[.12em] text-[#777e85]";
 
@@ -87,14 +81,24 @@ function Dashboard() {
       "bg-[#d6e6fb] text-[#1954a0]",
       (counts.pendingAllocation ?? 0) > 0,
     ],
-    [
-      "assignment",
-      "Reports in review",
-      String(counts.reportsAwaitingReview ?? 0),
-      "Waiting for a manager",
-      "bg-[#d6e6fb] text-[#1954a0]",
-      (counts.reportsAwaitingReview ?? 0) > 0,
-    ],
+    counts.draftJobs != null
+      ? [
+          "edit_note",
+          "Draft jobs",
+          String(counts.draftJobs),
+          "Awaiting confirmation · holding technician slots",
+          "bg-[#f3e2c7] text-[#a56b00]",
+          counts.draftJobs > 0,
+          "/scheduling?drafts=1",
+        ]
+      : [
+          "assignment",
+          "Reports in review",
+          String(counts.reportsAwaitingReview ?? 0),
+          "Waiting for a manager",
+          "bg-[#d6e6fb] text-[#1954a0]",
+          (counts.reportsAwaitingReview ?? 0) > 0,
+        ],
     openInvoices
       ? [
           "account_balance",
@@ -136,6 +140,15 @@ function Dashboard() {
       note: `${openInvoices.count} open · ${formatPeso(openInvoices.amount)}`,
     });
   }
+  // Drafts hold technician slots, so they lead the attention list.
+  if (counts.draftJobs != null) {
+    pulseItems.unshift({
+      icon: "edit_note",
+      color: "text-[#a56b00]",
+      title: "Draft jobs awaiting confirmation",
+      note: `${counts.draftJobs} holding technician slots`,
+    });
+  }
 
   return (
     <main className="flex h-screen overflow-hidden bg-[#1f2022] font-sans text-[#063b7c] max-[1024px]:block">
@@ -157,29 +170,44 @@ function Dashboard() {
           )}
 
           <section className="grid grid-cols-4 gap-[18px] max-[1024px]:grid-cols-2 max-[620px]:grid-cols-1 max-[620px]:gap-1">
-            {metrics.map(([icon, title, value, note, tone, alert]) => (
-              <article
-                className={`relative min-h-[156px] rounded-[10px] border bg-white p-[22px] shadow-[0_3px_7px_rgb(31_59_82_/_13%)] max-[1024px]:min-h-[105px] max-[1024px]:p-4 max-[620px]:min-h-[64px] max-[620px]:rounded-[6px] max-[620px]:p-3 ${alert ? "border-[#ff725f] shadow-[0_3px_8px_rgb(255_114_95_/_22%)]" : "border-[#e0e6eb]"}`}
-                key={title}
-              >
-                <div
-                  className={`grid h-9 w-9 place-items-center rounded-[6px] text-[15px] max-[620px]:hidden ${tone}`}
+            {metrics.map(([icon, title, value, note, tone, alert, href]) => {
+              const cardClass = `relative min-h-[156px] rounded-[10px] border bg-white p-[22px] shadow-[0_3px_7px_rgb(31_59_82_/_13%)] max-[1024px]:min-h-[105px] max-[1024px]:p-4 max-[620px]:min-h-[64px] max-[620px]:rounded-[6px] max-[620px]:p-3 ${alert ? "border-[#ff725f] shadow-[0_3px_8px_rgb(255_114_95_/_22%)]" : "border-[#e0e6eb]"}`;
+              const body = (
+                <>
+                  <div
+                    className={`grid h-9 w-9 place-items-center rounded-[6px] text-[15px] max-[620px]:hidden ${tone}`}
+                  >
+                    <span className="material-symbols-outlined text-[21px]">
+                      {icon}
+                    </span>
+                  </div>
+                  <p className="mb-0 mt-5 text-[11px] font-bold uppercase tracking-[.06em] text-[#858b90] max-[1024px]:mt-3 max-[620px]:mt-0 max-[620px]:text-[7px]">
+                    {title}
+                  </p>
+                  <strong className="mt-px block text-[29px] font-extrabold leading-tight max-[1024px]:text-[23px] max-[620px]:text-[15px]">
+                    {isLoading ? "—" : value}
+                  </strong>
+                  <small className="text-[10px] text-[#8e959b] max-[620px]:hidden">
+                    {note}
+                  </small>
+                </>
+              );
+
+              return href ? (
+                <Link
+                  key={title}
+                  to={href}
+                  aria-label={`${title}: ${value}. Open the draft jobs list.`}
+                  className={`${cardClass} block text-inherit no-underline transition hover:border-[#1250a0]`}
                 >
-                  <span className="material-symbols-outlined text-[21px]">
-                    {icon}
-                  </span>
-                </div>
-                <p className="mb-0 mt-5 text-[11px] font-bold uppercase tracking-[.06em] text-[#858b90] max-[1024px]:mt-3 max-[620px]:mt-0 max-[620px]:text-[7px]">
-                  {title}
-                </p>
-                <strong className="mt-px block text-[29px] font-extrabold leading-tight max-[1024px]:text-[23px] max-[620px]:text-[15px]">
-                  {isLoading ? "—" : value}
-                </strong>
-                <small className="text-[10px] text-[#8e959b] max-[620px]:hidden">
-                  {note}
-                </small>
-              </article>
-            ))}
+                  {body}
+                </Link>
+              ) : (
+                <article key={title} className={cardClass}>
+                  {body}
+                </article>
+              );
+            })}
           </section>
 
           <div className="mt-4 grid grid-cols-[minmax(0,2.25fr)_minmax(260px,1fr)] gap-[18px] max-[1024px]:grid-cols-[minmax(0,1.4fr)_minmax(180px,1fr)] max-[1024px]:gap-3 max-[620px]:grid-cols-1">
@@ -210,7 +238,7 @@ function Dashboard() {
                   <span>Client &amp; site</span>
                   <span>Assigned technician</span>
                   <span>Stock check</span>
-                  <span>Open</span>
+                  <span aria-hidden="true" />
                 </div>
                 {isLoading ? (
                   <p className="px-5 py-8 text-center text-[12px] text-[#8d969e]">
@@ -250,15 +278,20 @@ function Dashboard() {
                           </small>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span className="grid h-7 w-7 place-items-center rounded-full bg-[#17549e] text-[9px] font-bold text-white">
+                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#17549e] text-[9px] font-bold text-white">
                             {job.technicianInitials}
                           </span>
                           <span className="min-w-0 truncate">
                             {job.technicianName}
                           </span>
-                          <b className="ml-1 shrink-0 rounded-[3px] bg-[#d9e8fa] px-[5px] py-1 text-[8px] text-[#15519c]">
-                            {partsBadge(job.partsStatus)}
-                          </b>
+                          {job.additionalTechnicianCount > 0 && (
+                            <span
+                              title={job.technicianNames?.join(", ")}
+                              className="shrink-0 rounded-[3px] bg-[#d9e8fa] px-[5px] py-1 text-[8px] font-bold text-[#15519c]"
+                            >
+                              +{job.additionalTechnicianCount}
+                            </span>
+                          )}
                         </div>
                         <span
                           className={`w-max rounded-[9px] px-3 py-1.5 text-[8px] ${stock === "Available" || stock === "Not needed" ? "border border-[#8bdba2] bg-[#dff8e5] text-[#18823a]" : "border border-[#ff9f8f] bg-[#ffe0da] text-[#d75342]"}`}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { callAuthFunction } from "../lib/auth.js";
+import ConfirmPasswordDialog from "./ConfirmPasswordDialog.jsx";
 
 const roles = [
   "Admin",
@@ -34,7 +35,9 @@ function Account() {
   const [searchTerm, setSearchTerm] = useState("");
   const [formError, setFormError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-  const [deletingAccountId, setDeletingAccountId] = useState(null);
+  const [pendingDeletion, setPendingDeletion] = useState(null);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deleteAccountError, setDeleteAccountError] = useState("");
   const [showTemporaryPassword, setShowTemporaryPassword] = useState(false);
   const [pendingResetRequests, setPendingResetRequests] = useState([]);
   const [isLoadingResets, setIsLoadingResets] = useState(true);
@@ -152,26 +155,30 @@ function Account() {
     }
   };
 
-  const handleDeleteAccount = async (account) => {
-    if (
-      !window.confirm(`Remove ${account.name} from the active user directory?`)
-    )
-      return;
-    setDeletingAccountId(account.id);
+  const handleDeleteAccount = async (password) => {
+    if (!pendingDeletion) return;
+    setDeleteAccountError("");
     setFormError("");
     setSuccessMessage("");
+    setIsDeletingAccount(true);
     try {
-      await callAuthFunction("delete-user", { userId: account.id });
+      await callAuthFunction("delete-user", {
+        userId: pendingDeletion.id,
+        password,
+      });
       setAccounts((currentAccounts) =>
         currentAccounts.filter(
-          (currentAccount) => currentAccount.id !== account.id,
+          (currentAccount) => currentAccount.id !== pendingDeletion.id,
         ),
       );
-      setSuccessMessage(`${account.name} was removed from the user directory.`);
+      setSuccessMessage(
+        `${pendingDeletion.name} was removed from the user directory.`,
+      );
+      setPendingDeletion(null);
     } catch (error) {
-      setFormError(error.message);
+      setDeleteAccountError(error.message);
     } finally {
-      setDeletingAccountId(null);
+      setIsDeletingAccount(false);
     }
   };
 
@@ -540,7 +547,7 @@ function Account() {
               </div>
 
               {filteredAccounts.length > 0 ? (
-                <div className="divide-y divide-[#e8edf1]">
+                <div className="max-h-[380px] divide-y divide-[#e8edf1] overflow-y-auto [scrollbar-color:#c3d0dc_transparent] [scrollbar-width:thin] max-[620px]:max-h-[420px]">
                   {filteredAccounts.map((account) => (
                     <article
                       className="grid grid-cols-[minmax(0,1.5fr)_minmax(110px,0.8fr)_auto_110px] items-center gap-4 px-6 py-4 max-[620px]:grid-cols-[minmax(0,1fr)_auto] max-[620px]:gap-2 max-[620px]:px-4"
@@ -577,15 +584,20 @@ function Account() {
                       </span>
                       <button
                         type="button"
-                        onClick={() => handleDeleteAccount(account)}
-                        disabled={deletingAccountId === account.id}
+                        onClick={() => {
+                          setDeleteAccountError("");
+                          setPendingDeletion(account);
+                        }}
+                        disabled={
+                          isDeletingAccount && pendingDeletion?.id === account.id
+                        }
                         className="inline-flex items-center justify-center gap-1 rounded-[6px] border border-[#f0b8b0] bg-[#fff7f5] px-2.5 py-1.5 text-[10px] font-bold text-[#b64132] transition-colors hover:bg-[#fff0ec] disabled:cursor-wait disabled:opacity-60 max-[620px]:col-start-2 max-[620px]:row-start-2"
                         title="Remove user"
                       >
                         <span className="material-symbols-outlined text-[15px]">
                           person_remove
                         </span>
-                        {deletingAccountId === account.id
+                        {isDeletingAccount && pendingDeletion?.id === account.id
                           ? "Removing..."
                           : "Remove"}
                       </button>
@@ -613,6 +625,21 @@ function Account() {
           </div>
         </div>
       </section>
+      {pendingDeletion && (
+        <ConfirmPasswordDialog
+          title="Remove account"
+          message={`Remove ${pendingDeletion.name} (${pendingDeletion.email}) from the user directory?`}
+          detail="They lose access immediately. Their jobs, field reports, and stock history stay intact, and the account itself is deactivated rather than erased."
+          confirmLabel="Remove account"
+          busyLabel="Removing..."
+          isBusy={isDeletingAccount}
+          error={deleteAccountError}
+          onCancel={() => {
+            if (!isDeletingAccount) setPendingDeletion(null);
+          }}
+          onConfirm={handleDeleteAccount}
+        />
+      )}
     </main>
   );
 }

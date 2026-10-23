@@ -9,6 +9,20 @@ export const roleAccess = {
   "Billing Staff": ["sales_billing"],
 };
 
+// The job title shown on a profile is derived from the role, never typed.
+export const roleTitles = {
+  Admin: "Administrator",
+  "Service Manager": "Service Manager",
+  "Sales Manager": "Service Manager",
+  Technician: "Field Technician",
+  "Warehouse Manager": "Warehouse Manager",
+  "Billing Staff": "Billing Staff",
+};
+
+export function roleTitleFor(role) {
+  return roleTitles[role] ?? role ?? "";
+}
+
 export async function callAuthFunction(action, payload = {}) {
   const token = sessionStorage.getItem("authToken");
   // Account creation lives in guard-account (Admin-only). Password changes go to
@@ -16,7 +30,8 @@ export async function callAuthFunction(action, payload = {}) {
   // guard-account's change-password requires the Admin role.
   const functionName = action === "create-account" ? "guard-account" : "guard-auth";
   const { data, error } = await supabase.functions.invoke(functionName, {
-    body: { action, ...payload },
+    // The RPC name is spread last so a payload field can never replace it.
+    body: { ...payload, action },
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
 

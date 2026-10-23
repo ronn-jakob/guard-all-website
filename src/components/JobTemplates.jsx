@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
-import { callAuthFunction } from "../lib/auth.js";
+import { callAuthFunction, getSession } from "../lib/auth.js";
+import ConfirmPasswordDialog from "./ConfirmPasswordDialog.jsx";
 
 const jobTypes = [
   { value: "installation", label: "Installation" },
@@ -84,6 +86,15 @@ const emptyDraft = () => ({
 });
 
 function JobTemplates() {
+  const sessionUser = getSession()?.user;
+  const isAdmin = sessionUser?.role === "Admin";
+  const sessionBranch = String(sessionUser?.branch ?? "");
+  // Non-admins can only write templates for their own branch, so the picker is
+  // narrowed rather than showing options the server would reject.
+  const availableBranchOptions = isAdmin
+    ? branchOptions
+    : branchOptions.filter((option) => option.value === sessionBranch);
+
   const [templates, setTemplates] = useState([]);
   const [parts, setParts] = useState([]);
   const [draft, setDraft] = useState(null);
@@ -92,6 +103,10 @@ function JobTemplates() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [saveMessage, setSaveMessage] = useState("");
+  const [notice, setNotice] = useState("");
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -175,6 +190,27 @@ function JobTemplates() {
     setDraft(target ? toDraft(target) : null);
   }
 
+  async function handleDeleteTemplate(password) {
+    if (!draft?.id) return;
+    setDeleteError("");
+    setIsDeleting(true);
+    try {
+      const result = await callAuthFunction("delete-job-template", {
+        templateId: draft.id,
+        password,
+      });
+      setIsDeleteOpen(false);
+      setNotice(result.message);
+      setSaveMessage("");
+      // An archived template still exists, so reopen it; a deleted one is gone.
+      await reload(result.action === "archived" ? draft.id : null);
+    } catch (error) {
+      setDeleteError(error.message);
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   async function handleSave(event) {
     event.preventDefault();
     setSaveError("");
@@ -243,6 +279,15 @@ function JobTemplates() {
         <div className="px-8 pb-6 pt-8 max-[1024px]:px-6 max-[1024px]:pb-20 max-[1024px]:pt-5 max-[620px]:px-3">
           <header className="mb-6 flex flex-wrap items-end justify-between gap-4">
             <div>
+              <Link
+                to="/billing"
+                className="mb-2 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-[.1em] text-[#7f8992] no-underline hover:text-[#1250a0]"
+              >
+                <span className="material-symbols-outlined text-[15px]">
+                  arrow_back
+                </span>
+                Sales &amp; Billing
+              </Link>
               <p className="mb-1 text-[10px] font-bold uppercase tracking-[.12em] text-[#818b94]">
                 Finance / Pricing
               </p>
@@ -258,7 +303,7 @@ function JobTemplates() {
               onClick={() => {
                 setSaveError("");
                 setSaveMessage("");
-                setDraft(emptyDraft());
+                setDraft({ ...emptyDraft(), branch: isAdmin ? "" : sessionBranch });
               }}
               className="rounded-[6px] bg-[#1250a0] px-5 py-3 text-[12px] font-bold text-white shadow-[0_2px_4px_rgb(18_80_160_/_25%)] hover:bg-[#0f4387] max-[1024px]:px-4 max-[1024px]:py-2"
             >
@@ -272,6 +317,15 @@ function JobTemplates() {
               role="alert"
             >
               {loadError}
+            </p>
+          )}
+
+          {notice && (
+            <p
+              className="mb-4 rounded-[6px] border border-[#a8dfb7] bg-[#effaf2] px-4 py-3 text-[12px] text-[#267340]"
+              role="status"
+            >
+              {notice}
             </p>
           )}
 
@@ -420,18 +474,24 @@ function JobTemplates() {
                     <label className={labelClass}>
                       Branch
                       <select
-                        className={fieldClass}
+                        className={`${fieldClass} disabled:bg-[#f2f4f6]`}
                         value={draft.branch}
+                        disabled={!isAdmin}
                         onChange={(event) =>
                           setDraft({ ...draft, branch: event.target.value })
                         }
                       >
-                        {branchOptions.map((option) => (
+                        {availableBranchOptions.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
                         ))}
                       </select>
+                      {!isAdmin && (
+                        <span className="mt-1 text-[10px] font-normal text-[#8b949c]">
+                          Set by your account branch.
+                        </span>
+                      )}
                     </label>
                     <label className={labelClass}>
                       Description
@@ -628,21 +688,37 @@ function JobTemplates() {
                     </p>
                   )}
 
-                  <div className="flex justify-end gap-3 border-t border-[#e8edf1] pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setDraft(null)}
-                      className="rounded-[6px] border border-[#d6dee6] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#68798a] hover:bg-[#f7faff]"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isSaving}
-                      className="rounded-[6px] bg-[#1250a0] px-5 py-2.5 text-[12px] font-bold text-white hover:bg-[#0f4387] disabled:cursor-wait disabled:opacity-60"
-                    >
-                      {isSaving ? "Saving..." : "Save template"}
-                    </button>
+                  <div className="flex items-center justify-between gap-3 border-t border-[#e8edf1] pt-4">
+                    {draft.id ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteError("");
+                          setIsDeleteOpen(true);
+                        }}
+                        className="text-[11px] font-bold text-[#b33a3a] hover:underline"
+                      >
+                        Delete template
+                      </button>
+                    ) : (
+                      <span />
+                    )}
+                    <div className="flex gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setDraft(null)}
+                        className="rounded-[6px] border border-[#d6dee6] bg-white px-4 py-2.5 text-[12px] font-semibold text-[#68798a] hover:bg-[#f7faff]"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isSaving}
+                        className="rounded-[6px] bg-[#1250a0] px-5 py-2.5 text-[12px] font-bold text-white hover:bg-[#0f4387] disabled:cursor-wait disabled:opacity-60"
+                      >
+                        {isSaving ? "Saving..." : "Save template"}
+                      </button>
+                    </div>
                   </div>
                 </form>
               </section>
@@ -650,6 +726,19 @@ function JobTemplates() {
           </div>
         </div>
       </section>
+      {isDeleteOpen && draft?.id && (
+        <ConfirmPasswordDialog
+          title="Delete template"
+          message={`Remove "${draft.name || "this template"}"?`}
+          detail="If it has already been used on a quotation it will be archived instead of deleted, so those quotes keep their record and the picker stops offering it."
+          confirmLabel="Delete template"
+          busyLabel="Removing..."
+          isBusy={isDeleting}
+          error={deleteError}
+          onCancel={() => setIsDeleteOpen(false)}
+          onConfirm={handleDeleteTemplate}
+        />
+      )}
     </main>
   );
 }

@@ -21,14 +21,10 @@ function Sidebar() {
     .slice(0, 2)
     .join("")
     .toUpperCase();
-  const profilePhotoKey = session?.user?.id
-    ? `profilePhoto:${session.user.id}`
-    : "profilePhoto";
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
-  const [profilePhoto, setProfilePhoto] = useState(
-    () => localStorage.getItem(profilePhotoKey) || "",
-  );
+  // Photos live in a private bucket; the signed URL arrives with the session.
+  const profilePhoto = session?.user?.photoUrl || "";
   const navigate = useNavigate();
 
   // Body scroll lock when mobile sidebar is open
@@ -44,23 +40,20 @@ function Sidebar() {
   }, [menuOpen]);
 
   useEffect(() => {
-    const handleProfileUpdate = () => {
-      setProfilePhoto(localStorage.getItem(profilePhotoKey) || "");
-    };
     const handleAccountUpdate = () => setSession(getSession());
-
-    window.addEventListener("profile-updated", handleProfileUpdate);
     window.addEventListener("account-updated", handleAccountUpdate);
     return () => {
-      window.removeEventListener("profile-updated", handleProfileUpdate);
       window.removeEventListener("account-updated", handleAccountUpdate);
     };
-  }, [profilePhotoKey]);
+  }, []);
 
+  // Only the modules this role can open are listed. Access is still enforced by
+  // ProtectedRoute and the Edge Functions; hiding a link is not the boundary.
   const navigation = [
     ...primaryNavigation,
     ["manage_accounts", "Manage Accounts", "/account", "admin"],
-  ];
+    ["history", "Audit log", "/audit", "admin"],
+  ].filter(([, , , module]) => !module || canAccessModule(module, role));
   const handleLogout = () => {
     clearSession();
     setProfileOpen(false);
@@ -104,8 +97,7 @@ function Sidebar() {
           Operation console
         </p>
         <nav className="space-y-1 max-[1024px]:flex max-[1024px]:flex-col max-[1024px]:gap-1">
-          {navigation.map(([icon, name, path, module]) => {
-            const enabled = !module || canAccessModule(module, role);
+          {navigation.map(([icon, name, path]) => {
             const targetPath =
               name === "Field Reports" && role === "Technician"
                 ? "/reports/new"
@@ -120,27 +112,8 @@ function Sidebar() {
                   </span>
                 </span>
                 {name}
-                {!enabled && (
-                  <span className="material-symbols-outlined ml-auto text-[15px] opacity-70">
-                    lock
-                  </span>
-                )}
               </>
             );
-
-            if (!enabled) {
-              return (
-                <button
-                  className="group relative flex h-10 w-full cursor-not-allowed items-center gap-3 rounded-[7px] border-0 bg-transparent px-3.5 text-left text-[13px] font-medium text-white/45 max-[1024px]:h-10 max-[1024px]:px-3 max-[1024px]:text-[12px]"
-                  key={name}
-                  onClick={(event) => event.preventDefault()}
-                  title="Your role does not have access to this module"
-                  type="button"
-                >
-                  {content()}
-                </button>
-              );
-            }
 
             return (
               <NavLink

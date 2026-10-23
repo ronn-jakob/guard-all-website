@@ -2,8 +2,23 @@ import { Fragment, useState, useRef, useEffect } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
-import { callAuthFunction } from "../lib/auth.js";
+import { callAuthFunction, getSession } from "../lib/auth.js";
+import ConfirmPasswordDialog from "./ConfirmPasswordDialog.jsx";
 import { buildAllocationPrefill } from "../lib/allocation.js";
+import {
+  filterAllocationJobs,
+  formatAllocationDate,
+  formatPartsSummary,
+} from "../lib/allocationHistory.js";
+import {
+  isCategoryNameTaken,
+  isPrefixTaken,
+  isValidPrefix,
+  nextSku,
+  normaliseCategoryName,
+  normalisePrefix,
+  suggestPrefix,
+} from "../lib/inventoryCategories.js";
 
 function formatCurrency(value) {
   return `₱${Number(value || 0).toLocaleString("en-PH", {
@@ -42,6 +57,7 @@ function mapInventoryRecord(row) {
     part.unit_of_measure,
     part.notes || "",
     quantityAvailable,
+    part.category_id || "",
   ];
 }
 
@@ -62,19 +78,27 @@ async function fetchInventoryRecords(action = "list-inventory", payload = {}) {
 }
 
 const branchOptions = ["All branches", "Makati", "Cebu"];
-const categoryOptions = [
-  "All categories",
-  "Power",
-  "Intrusion",
-  "Access",
-  "CCTV",
-];
+
+// Outcome of a work order's stock: open while anything is still reserved, then
+// whether the reservation was fully used, fully returned, or a mix.
+const allocationOutcomeStyles = {
+  "In progress": "border-[#e6b24c] bg-[#fff8e6] text-[#a56b00]",
+  "Fully used": "border-[#8bdba2] bg-[#dff8e5] text-[#18823a]",
+  "Partly returned": "border-[#73a9eb] bg-[#eef6ff] text-[#1762b1]",
+  "Fully returned": "border-[#d7dadd] bg-[#f4f5f6] text-[#70777d]",
+};
+const allocationOutcomeFilters = ["All", "In progress", "Closed"];
 
 function Inventory() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [searchParams] = useSearchParams();
   const allocationJobNumber = searchParams.get("job");
+  const sessionUser = getSession()?.user;
+  const isAdmin = sessionUser?.role === "Admin";
+  const accountBranchLabel = sessionUser?.branch
+    ? String(sessionUser.branch).replace(/^./, (letter) => letter.toUpperCase())
+    : "Makati";
   const isAllocationRoute = pathname === "/inventory/allocate";
   const isJobAllocation = Boolean(allocationJobNumber);
   const [inventoryRecords, setInventoryRecords] = useState([]);
@@ -83,7 +107,6 @@ function Inventory() {
   const [isLoadingInventory, setIsLoadingInventory] = useState(true);
   const [isAllocatingStock, setIsAllocatingStock] = useState(false);
   const [inventoryError, setInventoryError] = useState("");
-  const [isCreateRequisition, setIsCreateRequisition] = useState(false);
   const [isAddNewItem, setIsAddNewItem] = useState(false);
   const [isEditItem, setIsEditItem] = useState(false);
   const [isSavingItem, setIsSavingItem] = useState(false);
@@ -92,12 +115,8 @@ function Inventory() {
   const [actionError, setActionError] = useState("");
   const [selectedItemCode, setSelectedItemCode] = useState(null);
   const [stockAdjustment, setStockAdjustment] = useState("");
-  const [status, setStatus] = useState("In stock");
   const [newItemQuantity, setNewItemQuantity] = useState("");
   const [newItemUnitPrice, setNewItemUnitPrice] = useState("");
-  const [requisitionReference] = useState(() =>
-    Math.floor(10000 + Math.random() * 90000),
-  );
 
   // Navigation & Toggle States (Default to metrics view on reload)
   const [activeTab, setActiveTab] = useState(
@@ -117,9 +136,16 @@ function Inventory() {
   const [jobAllocationsHistory, setJobAllocationsHistory] = useState([]);
   const [isLoadingJobAllocationsHistory, setIsLoadingJobAllocationsHistory] = useState(true);
   const [jobAllocationsHistoryError, setJobAllocationsHistoryError] = useState("");
+  const [allocationSearch, setAllocationSearch] = useState("");
+  const [allocationOutcome, setAllocationOutcome] = useState("All");
+  const [expandedAllocationId, setExpandedAllocationId] = useState("");
+  const [isDeletePartOpen, setIsDeletePartOpen] = useState(false);
+  const [isDeletingPart, setIsDeletingPart] = useState(false);
+  const [deletePartError, setDeletePartError] = useState("");
+  const [partNotice, setPartNotice] = useState("");
 
   // Branch dropdown & filtering state
-  const [selectedBranch, setSelectedBranch] = useState("All branches");
+  const [selectedBranch, setSelectedBranch] = useState(isAdmin ? "All branches" : accountBranchLabel);
   const branchBeforeJobAllocation = useRef("All branches");
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const branchDropdownRef = useRef(null);
@@ -127,6 +153,172 @@ function Inventory() {
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
   const categoryDropdownRef = useRef(null);
   const [searchTerm, setSearchTerm] = useState("");
+  // Archived parts keep their history but leave the working catalogue.
+  const [inventoryStatus, setInventoryStatus] = useState("active");
+
+  // Managed categories and the item-code state of the add/edit form.
+  const [categories, setCategories] = useState([]);
+  const [categoriesError, setCategoriesError] = useState("");
+  const [isLoadingCategories, setIsLoadingCategories] = useState(true);
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
+  const [skuMode, setSkuMode] = useState("auto");
+  const [manualSku, setManualSku] = useState("");
+  const [generatedSku, setGeneratedSku] = useState("");
+  const [isCategoryDialogOpen, setIsCategoryDialogOpen] = useState(false);
+  const [isManageCategoriesOpen, setIsManageCategoriesOpen] = useState(false);
+  const [editingCategory, setEditingCategory] = useState(null);
+  const [categoryFormName, setCategoryFormName] = useState("");
+  const [categoryFormPrefix, setCategoryFormPrefix] = useState("");
+  const [categoryPrefixEdited, setCategoryPrefixEdited] = useState(false);
+  const [isSavingCategory, setIsSavingCategory] = useState(false);
+  const [categoryFormError, setCategoryFormError] = useState("");
+
+  const activeCategories = categories.filter((category) => category.active);
+  const categoryFilterOptions = [
+    "All categories",
+    ...categories.map((category) => category.name),
+  ];
+  const categoryNameById = (categoryId) =>
+    categories.find((category) => category.id === categoryId)?.name ?? "";
+
+  async function loadCategories() {
+    try {
+      const { categories: incoming } = await callAuthFunction(
+        "list-part-categories",
+      );
+      const next = Array.isArray(incoming) ? incoming : [];
+      setCategories(next);
+      setCategoriesError("");
+      return next;
+    } catch (error) {
+      setCategoriesError(error.message);
+      return [];
+    } finally {
+      setIsLoadingCategories(false);
+    }
+  }
+
+  function nextSkuFor(categoryId) {
+    const category = categories.find((entry) => entry.id === categoryId);
+    if (!category) return "";
+    if (category.nextSku) return category.nextSku;
+    return nextSku(
+      inventoryRecords.map((record) => record[2]),
+      category.prefix,
+    );
+  }
+
+  function openAddItem() {
+    const firstCategory = activeCategories[0];
+    setFormError("");
+    setNewItemQuantity("");
+    setNewItemUnitPrice("");
+    setIsEditItem(false);
+    setSelectedCategoryId(firstCategory?.id ?? "");
+    setSkuMode("auto");
+    setManualSku("");
+    setGeneratedSku(firstCategory ? nextSkuFor(firstCategory.id) : "");
+    setIsAddNewItem(true);
+  }
+
+  function openEditItem(record) {
+    const categoryId =
+      record[17] ||
+      categories.find(
+        (category) =>
+          category.name.toLowerCase() === String(record[9]).toLowerCase(),
+      )?.id ||
+      "";
+    setFormError("");
+    setNewItemQuantity(record[3]);
+    setNewItemUnitPrice(
+      String(Number(record[7].replace(/[^0-9.]/g, ""))),
+    );
+    setSelectedCategoryId(categoryId);
+    setSkuMode("manual");
+    setManualSku(record[2]);
+    setGeneratedSku(record[2]);
+    setIsEditItem(true);
+  }
+
+  function openNewCategory() {
+    setEditingCategory(null);
+    setCategoryFormName("");
+    setCategoryFormPrefix("");
+    setCategoryPrefixEdited(false);
+    setCategoryFormError("");
+    setIsCategoryDialogOpen(true);
+  }
+
+  function openEditCategory(category) {
+    setEditingCategory(category);
+    setCategoryFormName(category.name);
+    setCategoryFormPrefix(category.prefix);
+    setCategoryPrefixEdited(true);
+    setCategoryFormError("");
+    setIsCategoryDialogOpen(true);
+  }
+
+  async function handleSaveCategory(event) {
+    event.preventDefault();
+    const name = normaliseCategoryName(categoryFormName);
+    const prefix = normalisePrefix(categoryFormPrefix);
+    if (!name) {
+      setCategoryFormError("Enter a category name.");
+      return;
+    }
+    if (!isValidPrefix(prefix)) {
+      setCategoryFormError("Use 2–6 letters or digits for the code prefix.");
+      return;
+    }
+    if (isCategoryNameTaken(name, categories, editingCategory?.id)) {
+      setCategoryFormError("A category with that name already exists.");
+      return;
+    }
+    if (isPrefixTaken(prefix, categories, editingCategory?.id)) {
+      setCategoryFormError("Another category already uses that prefix.");
+      return;
+    }
+
+    setIsSavingCategory(true);
+    setCategoryFormError("");
+    try {
+      const result = await callAuthFunction("save-part-category", {
+        categoryId: editingCategory?.id ?? "",
+        name,
+        prefix,
+      });
+      const refreshed = await loadCategories();
+      setIsCategoryDialogOpen(false);
+      if (!editingCategory) {
+        const created = refreshed.find((entry) => entry.id === result.category.id);
+        setSelectedCategoryId(result.category.id);
+        if (!isEditItem) {
+          setSkuMode("auto");
+          setGeneratedSku(created?.nextSku ?? `${result.category.prefix}-001`);
+        }
+      }
+    } catch (error) {
+      setCategoryFormError(error.message);
+    } finally {
+      setIsSavingCategory(false);
+    }
+  }
+
+  async function toggleCategory(category) {
+    setCategoriesError("");
+    try {
+      await callAuthFunction("save-part-category", {
+        categoryId: category.id,
+        name: category.name,
+        prefix: category.prefix,
+        isActive: !category.active,
+      });
+      await loadCategories();
+    } catch (error) {
+      setCategoriesError(error.message);
+    }
+  }
 
   // Shared by the deep link (?job=...) and the pending-request picker so both
   // paths pre-fill the allocation list identically.
@@ -164,7 +356,10 @@ function Inventory() {
         })
       : isAllocationRoute
         ? Promise.resolve(null)
-        : callAuthFunction("list-inventory");
+        : callAuthFunction(
+            "list-inventory",
+            inventoryStatus === "archived" ? { status: "archived" } : {},
+          );
     inventoryRequest
       .then((result) => {
         if (!isCurrent) return;
@@ -207,10 +402,22 @@ function Inventory() {
       .finally(() => {
         if (isCurrent) setIsLoadingJobAllocationsHistory(false);
       });
+    callAuthFunction("list-part-categories")
+      .then(({ categories: incoming }) => {
+        if (!isCurrent) return;
+        setCategories(Array.isArray(incoming) ? incoming : []);
+        setCategoriesError("");
+      })
+      .catch((error) => {
+        if (isCurrent) setCategoriesError(error.message);
+      })
+      .finally(() => {
+        if (isCurrent) setIsLoadingCategories(false);
+      });
     return () => {
       isCurrent = false;
     };
-  }, [allocationJobNumber, isAllocationRoute, isJobAllocation, navigate]);
+  }, [allocationJobNumber, isAllocationRoute, isJobAllocation, navigate, inventoryStatus]);
 
   // Close branch dropdown on outside click
   useEffect(() => {
@@ -255,6 +462,10 @@ function Inventory() {
   const availableQuantities = new Map(
     recordsToDisplay.map((item) => [item[12], item[16] ?? Number(item[3])]),
   );
+  const visibleAllocations = filterAllocationJobs(jobAllocationsHistory, {
+    query: allocationSearch,
+    outcome: allocationOutcome,
+  });
   const newItemTotalCost =
     (Number(newItemQuantity) || 0) * (Number(newItemUnitPrice) || 0);
   const selectedInventoryItem = inventoryRecords.find(
@@ -385,6 +596,42 @@ function Inventory() {
     setActiveTab("Stock Ledger");
   }
 
+  async function handleDeletePart(password) {
+    if (!selectedInventoryItem) return;
+    setDeletePartError("");
+    setIsDeletingPart(true);
+    try {
+      const result = await callAuthFunction("delete-inventory-part", {
+        partId: selectedInventoryItem[13],
+        password,
+      });
+      setIsDeletePartOpen(false);
+      setSelectedItemCode(null);
+      setPartNotice(result.message);
+      const { items = [] } = await callAuthFunction("list-inventory");
+      setInventoryRecords(items.map(mapInventoryRecord));
+    } catch (error) {
+      setDeletePartError(error.message);
+    } finally {
+      setIsDeletingPart(false);
+    }
+  }
+
+  async function handleRestorePart(partId) {
+    setPartNotice("");
+    setInventoryError("");
+    try {
+      const result = await callAuthFunction("restore-inventory-part", { partId });
+      setPartNotice(result.message);
+      const { items = [] } = await callAuthFunction("list-inventory", {
+        status: "archived",
+      });
+      setInventoryRecords(items.map(mapInventoryRecord));
+    } catch (error) {
+      setInventoryError(error.message);
+    }
+  }
+
   async function handleStockAdjustment(direction) {
     const quantity = Number(stockAdjustment);
     if (!selectedItemCode || !Number.isInteger(quantity) || quantity <= 0) {
@@ -411,18 +658,24 @@ function Inventory() {
   async function handleSaveInventoryItem(event) {
     event.preventDefault();
     setFormError("");
+    if (!selectedCategoryId) {
+      setFormError("Choose a category for this item.");
+      return;
+    }
     setIsSavingItem(true);
     const formData = Object.fromEntries(new FormData(event.currentTarget));
     const item = {
       name: formData.partName,
-      sku: formData.sku,
+      // An empty code on a create asks the server to generate one from the
+      // category prefix. Editing never rewrites an existing code.
+      sku: isEditItem ? manualSku : skuMode === "auto" ? "" : manualSku,
       quantity: Number(formData.quantity),
       reorderThreshold: Number(formData.minimumStock),
       branch: formData.branch,
       address: formData.address,
       unitCost: Number(formData.unitPrice),
       unitOfMeasure: formData.unitOfMeasure,
-      category: formData.category,
+      categoryId: selectedCategoryId,
       notes: formData.notes,
     };
 
@@ -437,6 +690,7 @@ function Inventory() {
         await callAuthFunction("create-inventory-item", { item });
       }
       setInventoryRecords(await fetchInventoryRecords());
+      await loadCategories();
       setNewItemQuantity("");
       setNewItemUnitPrice("");
       setIsAddNewItem(false);
@@ -472,23 +726,17 @@ function Inventory() {
             <div className="flex items-center gap-3 max-[620px]:gap-2">
               {!isAllocatingForJob && !isAllocationRoute && !isJobAllocation && <button
                 type="button"
-                onClick={() => {
-                  setFormError("");
-                  setNewItemQuantity("");
-                  setNewItemUnitPrice("");
-                  setIsEditItem(false);
-                  setIsAddNewItem(true);
-                }}
+                onClick={openAddItem}
                 className="rounded-[6px] border border-[#1250a0] bg-white px-5 py-3 text-[12px] font-bold text-[#1250a0] shadow-[0_2px_4px_rgb(18_80_160_/_12%)] hover:bg-[#f3f8ff] max-[1024px]:px-4 max-[1024px]:py-2 max-[620px]:text-[9px]"
               >
                 + Add New Item
               </button>}
               {!isAllocatingForJob && !isAllocationRoute && !isJobAllocation && <button
                 type="button"
-                onClick={() => setIsCreateRequisition(true)}
-                className="rounded-[6px] bg-[#1250a0] px-5 py-3 text-[12px] font-bold text-white shadow-[0_2px_4px_rgb(18_80_160_/_25%)] max-[1024px]:px-4 max-[1024px]:py-2 max-[620px]:text-[9px]"
+                onClick={() => setIsManageCategoriesOpen(true)}
+                className="rounded-[6px] border border-[#d9dfe4] bg-white px-4 py-3 text-[12px] font-bold text-[#5e6b78] hover:bg-[#f4f6f8] max-[1024px]:px-3 max-[1024px]:py-2 max-[620px]:hidden"
               >
-                + Create Requisition
+                Categories
               </button>}
             </div>
           </div>
@@ -580,7 +828,38 @@ function Inventory() {
                       />
                     </label>
 
+                    {!isAllocatingForJob && !isAllocationRoute && (
+                      <div className="flex rounded-full border border-[#dfe4e8] bg-[#f8fafc] p-1 text-[10px]">
+                        {[
+                          { id: "active", label: "Active" },
+                          { id: "archived", label: "Archived" },
+                        ].map((option) => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => setInventoryStatus(option.id)}
+                            className={`rounded-full px-3 py-1 ${
+                              inventoryStatus === option.id
+                                ? "bg-white font-bold text-[#174f9a] shadow-sm"
+                                : "text-[#87929d]"
+                            }`}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
                     {/* Branch Selection Dropdown */}
+                    {!isAdmin && (
+                      <span className="flex h-9 items-center gap-2 rounded-[6px] border border-[#d9dfe4] bg-[#f8f9fa] px-3 text-[11px] font-medium text-[#174f9a] max-[620px]:hidden">
+                        <span className="material-symbols-outlined text-[17px]">
+                          tune
+                        </span>
+                        {accountBranchLabel}
+                      </span>
+                    )}
+                    {isAdmin && (
                     <div className="relative" ref={branchDropdownRef}>
                       <button
                         type="button"
@@ -623,6 +902,7 @@ function Inventory() {
                         </div>
                       )}
                     </div>
+                    )}
                     <div className="relative" ref={categoryDropdownRef}>
                       <button
                         type="button"
@@ -642,7 +922,7 @@ function Inventory() {
 
                       {isCategoryDropdownOpen && (
                         <div className="absolute right-0 z-30 mt-1.5 w-44 rounded-[8px] border border-[#d9dfe4] bg-white p-1 shadow-[0_8px_20px_rgba(0,0,0,0.12)]">
-                          {categoryOptions.map((category) => (
+                          {categoryFilterOptions.map((category) => (
                             <button
                               key={category}
                               type="button"
@@ -736,6 +1016,15 @@ function Inventory() {
                   </p>
                 )}
 
+                {partNotice && (
+                  <p
+                    className="m-0 border-b border-[#a8dfb7] bg-[#effaf2] px-7 py-3 text-[12px] text-[#267340]"
+                    role="status"
+                  >
+                    {partNotice}
+                  </p>
+                )}
+
                 {isLoadingInventory ? (
                   <div className="py-12 text-center text-[13px] text-[#8e959b]">
                     Loading inventory...
@@ -768,6 +1057,7 @@ function Inventory() {
                       statusName,
                       alert,
                       stockId,
+                      partId,
                     ]) => {
                       const isChecked = !!selectedItems[stockId];
                       const availableQuantity = Number(
@@ -790,7 +1080,7 @@ function Inventory() {
                               alert ? "bg-[#fff3f1]" : "bg-white"
                             } ${!isAllocatingForJob ? "cursor-pointer hover:bg-[#f8fbff]" : ""}`}
                             onClick={() => {
-                              if (!isAllocatingForJob) {
+                              if (!isAllocatingForJob && inventoryStatus !== "archived") {
                                 setSelectedItemCode(stockId);
                                 setStockAdjustment("");
                                 setActionError("");
@@ -852,15 +1142,21 @@ function Inventory() {
                             </span>
                             <span
                               className={`w-max rounded-full border px-3 py-1 text-[10px] ${
-                                alert
-                                  ? "border-[#ffb0a3] text-[#f05b48]"
-                                  : "border-[#d7dadd] text-[#70777d]"
+                                inventoryStatus === "archived"
+                                  ? "border-[#d7dadd] text-[#70777d]"
+                                  : alert
+                                    ? "border-[#ffb0a3] text-[#f05b48]"
+                                    : "border-[#d7dadd] text-[#70777d]"
                               }`}
                             >
                               <span className="material-symbols-outlined mr-1 align-middle text-[13px]">
-                                {alert ? "warning" : "check_circle"}
+                                {inventoryStatus === "archived"
+                                  ? "inventory_2"
+                                  : alert
+                                    ? "warning"
+                                    : "check_circle"}
                               </span>
-                              {statusName}
+                              {inventoryStatus === "archived" ? "Archived" : statusName}
                             </span>
                             <div className="flex items-center justify-end gap-2">
                               {isAllocatingForJob ? (
@@ -899,6 +1195,17 @@ function Inventory() {
                                     }`}
                                   />
                                 </>
+                              ) : inventoryStatus === "archived" ? (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleRestorePart(partId);
+                                  }}
+                                  className="text-right text-[10px] font-bold text-[#1250a0] hover:underline"
+                                >
+                                  Restore
+                                </button>
                               ) : (
                                 <button
                                   type="button"
@@ -923,7 +1230,7 @@ function Inventory() {
                                 : "max-[620px]:border-[#dfe6ec] max-[620px]:bg-white"
                             } ${!isAllocatingForJob ? "max-[620px]:cursor-pointer" : ""}`}
                             onClick={() => {
-                              if (!isAllocatingForJob) {
+                              if (!isAllocatingForJob && inventoryStatus !== "archived") {
                                 setSelectedItemCode(stockId);
                                 setStockAdjustment("");
                                 setActionError("");
@@ -949,12 +1256,14 @@ function Inventory() {
                             <div className="flex flex-none flex-col items-end gap-1.5">
                               <span
                                 className={`w-max rounded-full px-2.5 py-1 text-[10px] font-bold ${
-                                  alert
-                                    ? "bg-[#ffd9d2] text-[#e05b45]"
-                                    : "bg-[#e1f6e4] text-[#388b47]"
+                                  inventoryStatus === "archived"
+                                    ? "bg-[#f1f2f3] text-[#70777d]"
+                                    : alert
+                                      ? "bg-[#ffd9d2] text-[#e05b45]"
+                                      : "bg-[#e1f6e4] text-[#388b47]"
                                 }`}
                               >
-                                {statusName}
+                                {inventoryStatus === "archived" ? "Archived" : statusName}
                               </span>
                               {isAllocatingForJob ? (
                                 <div className="flex items-center gap-2">
@@ -987,6 +1296,17 @@ function Inventory() {
                                     }`}
                                   />
                                 </div>
+                              ) : inventoryStatus === "archived" ? (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    handleRestorePart(partId);
+                                  }}
+                                  className="rounded-[5px] border border-[#1250a0] bg-white px-2.5 py-1 text-[9px] font-bold text-[#1250a0]"
+                                >
+                                  Restore
+                                </button>
                               ) : (
                                 <strong className="text-[13px] text-[#174f9a]">
                                   {quantity}
@@ -1135,27 +1455,57 @@ function Inventory() {
             {/* TAB 3: JOB ALLOCATIONS HISTORY */}
             {activeTab === "Job Allocations History" && (
               <div className="p-7">
-                <div className="mb-4 flex items-center justify-between">
+                <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
                   <div>
                     <p className="m-0 text-[10px] font-bold uppercase tracking-[.12em] text-[#777e85]">
-                      RECORDED STOCK MOVEMENTS
+                      WORK ORDER ALLOCATIONS
                     </p>
                     <h2 className="m-0 mt-1 text-[21px] font-bold text-[#063b7c]">
                       Job Allocations History
                     </h2>
+                    <p className="m-0 mt-1 text-[11px] text-[#8b949c]">
+                      One row per work order. Expand it to see each part that was
+                      reserved, used, or returned.
+                    </p>
                   </div>
                   <span className="rounded-full border border-[#d7dadd] bg-[#fafafa] px-3 py-1 text-[11px] font-bold text-[#70777d]">
-                    {jobAllocationsHistory.length} {jobAllocationsHistory.length === 1 ? "entry" : "entries"}
+                    {visibleAllocations.length} of {jobAllocationsHistory.length} work orders
                   </span>
                 </div>
 
+                <div className="mb-3 flex flex-wrap items-center gap-2">
+                  <input
+                    value={allocationSearch}
+                    onChange={(event) => setAllocationSearch(event.target.value)}
+                    placeholder="Search work order, client, or part"
+                    className="h-8 w-64 rounded-[6px] border border-[#d9dfe4] bg-white px-3 text-[11px] text-[#174f9a] outline-none focus:border-[#1250a0] max-[620px]:w-full"
+                  />
+                  <div className="flex rounded-full border border-[#dfe4e8] bg-[#f8fafc] p-1 text-[10px]">
+                    {allocationOutcomeFilters.map((filter) => (
+                      <button
+                        key={filter}
+                        type="button"
+                        onClick={() => setAllocationOutcome(filter)}
+                        className={`rounded-full px-3 py-1 ${
+                          allocationOutcome === filter
+                            ? "bg-white font-bold text-[#174f9a] shadow-sm"
+                            : "text-[#87929d]"
+                        }`}
+                      >
+                        {filter}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
                 <div className="overflow-hidden rounded-[8px] border border-[#dfe6ec]">
-                  <div className="grid grid-cols-[1.5fr_1.5fr_2fr_1fr_1.5fr] bg-[#fafafa] px-6 py-3 text-[10px] font-bold uppercase text-[#77818a] max-[850px]:grid-cols-[1.5fr_1.5fr_2fr_1.5fr] max-[850px]:[&>span:nth-child(4)]:hidden max-[620px]:grid-cols-[1.5fr_1.5fr_1.5fr] max-[620px]:[&>span:nth-child(5)]:hidden">
-                    <span>Date</span>
-                    <span>Job</span>
-                    <span>Item</span>
-                    <span>Qty Reserved</span>
-                    <span>Technician</span>
+                  <div className="grid grid-cols-[1.3fr_1.2fr_1.7fr_1fr_1fr_32px] bg-[#fafafa] px-6 py-3 text-[10px] font-bold uppercase text-[#77818a] max-[850px]:grid-cols-[1.4fr_1.2fr_1.8fr_1fr_32px] max-[850px]:[&>span:nth-child(5)]:hidden max-[620px]:grid-cols-[1.4fr_1.6fr_1fr_32px] max-[620px]:[&>span:nth-child(2)]:hidden max-[620px]:px-3">
+                    <span>Work order</span>
+                    <span>Client / date</span>
+                    <span>Parts</span>
+                    <span>Outcome</span>
+                    <span>Last activity</span>
+                    <span />
                   </div>
 
                   {isLoadingJobAllocationsHistory ? (
@@ -1170,39 +1520,111 @@ function Inventory() {
                     <p className="m-0 px-6 py-8 text-center text-[12px] text-[#8e959b]">
                       No stock reservations have been recorded.
                     </p>
+                  ) : visibleAllocations.length === 0 ? (
+                    <p className="m-0 px-6 py-8 text-center text-[12px] text-[#8e959b]">
+                      No work orders match this search.
+                    </p>
                   ) : (
-                    jobAllocationsHistory.map((item) => (
-                      <div
-                        key={item.id}
-                        className="grid grid-cols-[1.5fr_1.5fr_2fr_1fr_1.5fr] items-center border-t border-[#e4e8eb] px-6 py-4 text-[11px] max-[850px]:grid-cols-[1.5fr_1.5fr_2fr_1.5fr] max-[850px]:[&>*:nth-child(4)]:hidden max-[620px]:grid-cols-[1.5fr_1.5fr_1.5fr] max-[620px]:[&>*:nth-child(5)]:hidden"
-                      >
-                        <span className="text-[#8e959b]">
-                          {item.date
-                            ? new Date(item.date).toLocaleDateString("en-US", {
-                                month: "short",
-                                day: "numeric",
-                                year: "numeric",
-                              })
-                            : "—"}
-                        </span>
-                        <div>
-                          <strong className="block text-[#063b7c]">{item.job}</strong>
-                          <span className="text-[10px] capitalize text-[#8d969e]">
-                            {item.status}
-                          </span>
+                    visibleAllocations.map((job) => {
+                      const isExpanded = expandedAllocationId === job.jobId;
+                      return (
+                        <div key={job.jobId} className="border-t border-[#e4e8eb]">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedAllocationId(isExpanded ? "" : job.jobId)
+                            }
+                            className="grid w-full grid-cols-[1.3fr_1.2fr_1.7fr_1fr_1fr_32px] items-center px-6 py-4 text-left transition-colors hover:bg-[#f8fbff] max-[850px]:grid-cols-[1.4fr_1.2fr_1.8fr_1fr_32px] max-[850px]:[&>*:nth-child(5)]:hidden max-[620px]:grid-cols-[1.4fr_1.6fr_1fr_32px] max-[620px]:[&>*:nth-child(2)]:hidden max-[620px]:px-3"
+                          >
+                            <div className="min-w-0">
+                              <strong className="block truncate text-[12px] text-[#063b7c]">
+                                {job.jobNumber}
+                              </strong>
+                              <span className="block truncate text-[10px] text-[#8d969e]">
+                                {job.technicianNames?.join(", ") || "Unassigned"}
+                              </span>
+                            </div>
+                            <div className="min-w-0">
+                              <strong className="block truncate text-[11px] text-[#3a434d]">
+                                {job.clientName}
+                              </strong>
+                              <span className="block text-[10px] text-[#8d969e]">
+                                {formatAllocationDate(job.scheduledDate)}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-[#3a434d]">
+                              {formatPartsSummary(job.summary)}
+                            </span>
+                            <span
+                              className={`w-max rounded-full border px-2.5 py-1 text-[10px] font-bold ${
+                                allocationOutcomeStyles[job.outcome] ??
+                                allocationOutcomeStyles["In progress"]
+                              }`}
+                            >
+                              {job.outcome}
+                            </span>
+                            <span className="text-[10px] text-[#8d969e]">
+                              {formatAllocationDate(job.lastActivityAt)}
+                            </span>
+                            <span className="material-symbols-outlined text-[18px] text-[#8b949c]">
+                              {isExpanded ? "expand_less" : "expand_more"}
+                            </span>
+                          </button>
+
+                          {isExpanded && (
+                            <div className="border-t border-dashed border-[#e4e8eb] bg-[#fbfdff] px-6 py-3 max-[620px]:px-3">
+                              <div className="grid grid-cols-[2fr_.7fr_.7fr_.8fr_1fr_1fr_1fr] items-center gap-2 pb-2 text-[9px] font-bold uppercase tracking-[.06em] text-[#8b949c] max-[850px]:grid-cols-[2fr_.8fr_.8fr_1fr_1fr] max-[850px]:[&>span:nth-child(3)]:hidden max-[620px]:grid-cols-[2fr_.8fr_.8fr_1fr] max-[620px]:[&>span:nth-child(6)]:hidden">
+                                <span>Item</span>
+                                <span>Reserved</span>
+                                <span>Used</span>
+                                <span>Returned</span>
+                                <span>Status</span>
+                                <span>Report</span>
+                                <span>Last update</span>
+                              </div>
+                              {job.lines.map((line) => (
+                                <div
+                                  key={line.jobPartId}
+                                  className="grid grid-cols-[2fr_.7fr_.7fr_.8fr_1fr_1fr_1fr] items-center gap-2 border-t border-[#eef2f5] py-2 text-[11px] max-[850px]:grid-cols-[2fr_.8fr_.8fr_1fr_1fr] max-[850px]:[&>*:nth-child(3)]:hidden max-[620px]:grid-cols-[2fr_.8fr_.8fr_1fr] max-[620px]:[&>*:nth-child(6)]:hidden"
+                                >
+                                  <div className="min-w-0">
+                                    <strong className="block truncate text-[#174f9a]">
+                                      {line.name}
+                                    </strong>
+                                    <span className="block text-[10px] text-[#8d969e]">
+                                      {line.sku}
+                                      {line.unitOfMeasure ? ` · ${line.unitOfMeasure}` : ""}
+                                    </span>
+                                  </div>
+                                  <span className="text-[#3a434d]">
+                                    {line.reservedQuantity}
+                                  </span>
+                                  <span className="text-[#3a434d]">
+                                    {line.usedQuantity}
+                                  </span>
+                                  <span className="text-[#3a434d]">
+                                    {line.returnedQuantity}
+                                  </span>
+                                  <span className="capitalize text-[#607286]">
+                                    {line.status}
+                                  </span>
+                                  <span className="truncate text-[#607286]">
+                                    {line.reportNumbers?.length
+                                      ? line.reportNumbers.join(", ")
+                                      : "—"}
+                                  </span>
+                                  <span className="text-[10px] text-[#8d969e]">
+                                    {formatAllocationDate(
+                                      line.updatedAt ?? line.reservedAt,
+                                    )}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                        <div>
-                          <strong className="block text-[#063b7c]">
-                            {item.item}
-                          </strong>
-                          <span className="text-[10px] text-[#8d969e]">
-                            {item.code}
-                          </span>
-                        </div>
-                        <strong className="text-[#063b7c]">{item.quantity}</strong>
-                        <span className="text-[#3a434d]">{item.technician}</span>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </div>
@@ -1365,25 +1787,26 @@ function Inventory() {
                 </div>
               </div>
 
-              <footer className="flex justify-between border-t border-[#293d58] px-7 py-4 max-[620px]:px-5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFormError("");
-                    setNewItemQuantity(selectedInventoryItem[3]);
-                    setNewItemUnitPrice(
-                      String(
-                        Number(
-                          selectedInventoryItem[7].replace(/[^0-9.]/g, ""),
-                        ),
-                      ),
-                    );
-                    setIsEditItem(true);
-                  }}
-                  className="h-11 rounded-[8px] border border-[#4d88e8] px-5 text-[13px] font-semibold text-[#bcd4fa] hover:bg-[#1d3351]"
-                >
-                  Edit details
-                </button>
+              <footer className="flex justify-between gap-2 border-t border-[#293d58] px-7 py-4 max-[620px]:px-5">
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => openEditItem(selectedInventoryItem)}
+                    className="h-11 rounded-[8px] border border-[#4d88e8] px-5 text-[13px] font-semibold text-[#bcd4fa] hover:bg-[#1d3351]"
+                  >
+                    Edit details
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDeletePartError("");
+                      setIsDeletePartOpen(true);
+                    }}
+                    className="h-11 rounded-[8px] border border-[#7d3b34] px-4 text-[13px] font-semibold text-[#f0b8b0] hover:bg-[#3a2320] max-[620px]:px-3"
+                  >
+                    Delete part
+                  </button>
+                </div>
                 <button
                   type="button"
                   onClick={() => setSelectedItemCode(null)}
@@ -1446,14 +1869,54 @@ function Inventory() {
               >
                 <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
                   <label className="text-[14px] font-medium text-[#a9bfd9]">
-                    Item Code <span className="text-[#ff6557]">*</span>
+                    Item Code{" "}
+                    <span className="text-[#9ec1f0]">
+                      {isEditItem || skuMode === "manual" ? "*" : "(auto)"}
+                    </span>
                     <input
-                      required
+                      required={isEditItem || skuMode === "manual"}
                       name="sku"
-                      defaultValue={isEditItem ? selectedInventoryItem[2] : ""}
+                      value={
+                        isEditItem
+                          ? manualSku
+                          : skuMode === "auto"
+                            ? generatedSku
+                            : manualSku
+                      }
+                      onChange={(event) =>
+                        setManualSku(event.target.value.toUpperCase())
+                      }
+                      readOnly={isEditItem || skuMode === "auto"}
                       placeholder="e.g. DMP-145"
-                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+                      className={`mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8] ${
+                        isEditItem || skuMode === "auto" ? "opacity-80" : ""
+                      }`}
                     />
+                    {!isEditItem &&
+                      (skuMode === "auto" ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSkuMode("manual");
+                            setManualSku(generatedSku);
+                          }}
+                          className="mt-1 border-0 bg-transparent p-0 text-[11px] font-semibold text-[#9ec1f0] underline"
+                        >
+                          Enter manually
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSkuMode("auto");
+                            setManualSku("");
+                            setGeneratedSku(nextSkuFor(selectedCategoryId));
+                          }}
+                          className="mt-1 border-0 bg-transparent p-0 text-[11px] font-semibold text-[#9ec1f0] underline"
+                        >
+                          Use generated code
+                        </button>
+                      ))}
                   </label>
                   <label className="text-[14px] font-medium text-[#a9bfd9]">
                     Part Name <span className="text-[#ff6557]">*</span>
@@ -1507,13 +1970,19 @@ function Inventory() {
                       required
                       name="branch"
                       defaultValue={
-                        isEditItem ? selectedInventoryItem[5] : "Makati"
+                        isEditItem ? selectedInventoryItem[5] : accountBranchLabel
                       }
-                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
+                      disabled={!isAdmin}
+                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8] disabled:opacity-70"
                     >
                       <option>Makati</option>
                       <option>Cebu</option>
                     </select>
+                    {!isAdmin && (
+                      <span className="mt-1 block text-[11px] text-[#91a8c7]">
+                        Assigned to your account branch.
+                      </span>
+                    )}
                   </label>
                   <label className="text-[14px] font-medium text-[#a9bfd9]">
                     Address <span className="text-[#ff6557]">*</span>
@@ -1557,17 +2026,49 @@ function Inventory() {
                     Category <span className="text-[#ff6557]">*</span>
                     <select
                       required
-                      name="category"
-                      defaultValue={
-                        isEditItem ? selectedInventoryItem[9] : "Intrusion"
-                      }
+                      value={selectedCategoryId}
+                      onChange={(event) => {
+                        if (event.target.value === "__new") {
+                          openNewCategory();
+                          return;
+                        }
+                        setSelectedCategoryId(event.target.value);
+                        if (!isEditItem && skuMode === "auto") {
+                          setGeneratedSku(nextSkuFor(event.target.value));
+                        }
+                      }}
                       className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
                     >
-                      <option>Power</option>
-                      <option>Intrusion</option>
-                      <option>Access</option>
-                      <option>CCTV</option>
+                      {!selectedCategoryId && (
+                        <option value="">Select a category…</option>
+                      )}
+                      {activeCategories.map((category) => (
+                        <option key={category.id} value={category.id}>
+                          {category.name}
+                        </option>
+                      ))}
+                      {selectedCategoryId &&
+                        !activeCategories.some(
+                          (category) => category.id === selectedCategoryId,
+                        ) && (
+                          <option value={selectedCategoryId}>
+                            {categoryNameById(selectedCategoryId) ||
+                              "Current category"}{" "}
+                            (inactive)
+                          </option>
+                        )}
+                      <option value="__new">＋ New category…</option>
                     </select>
+                    {isLoadingCategories && (
+                      <small className="mt-1 block text-[11px] text-[#91a8c7]">
+                        Loading categories…
+                      </small>
+                    )}
+                    {categoriesError && (
+                      <small className="mt-1 block text-[11px] text-[#ffad9f]">
+                        {categoriesError}
+                      </small>
+                    )}
                   </label>
                   <label className="text-[14px] font-medium text-[#a9bfd9]">
                     Unit of Measure <span className="text-[#ff6557]">*</span>
@@ -1635,183 +2136,242 @@ function Inventory() {
           </div>
         )}
 
-        {/* Modal: Create Requisition */}
-        {isCreateRequisition && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-[#071426]/75 p-4 backdrop-blur-[2px] max-[620px]:items-end max-[620px]:p-0"
-            onMouseDown={(event) => {
-              if (event.target === event.currentTarget)
-                setIsCreateRequisition(false);
-            }}
-          >
-            <section
-              role="dialog"
-              className="flex max-h-[92vh] w-full max-w-[890px] flex-col overflow-hidden rounded-[17px] border border-[#263c5a] bg-[#172a44] text-[#e5edf8] shadow-[0_24px_80px_rgb(0_0_0_/_45%)] max-[620px]:max-h-[94vh] max-[620px]:rounded-b-none max-[620px]:rounded-t-[16px]"
-            >
-              <header className="flex shrink-0 items-start justify-between border-b border-[#293d58] px-7 py-5 max-[620px]:px-5 max-[620px]:py-4">
-                <div>
-                  <p className="m-0 text-[12px] font-semibold uppercase tracking-[.1em] text-[#91a8c7]">
-                    Stock Ledger / Inventory
-                  </p>
-                  <h2
-                    id="create-requisition-title"
-                    className="m-0 mt-1 text-[27px] font-bold text-[white] max-[620px]:text-[23px]"
-                  >
-                    Create Requisition
-                  </h2>
-                  <p className="m-0 mt-1 text-[15px] text-[#99afc9]">
-                    Add or request parts and equipment for stock management.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsCreateRequisition(false)}
-                  className="grid h-8 w-8 place-items-center text-[27px] leading-none text-[#91a8c7] hover:text-white"
-                >
-                  ×
-                </button>
-              </header>
-
-              <form
-                id="create-requisition-form"
-                className="min-h-0 flex-1 overflow-y-auto px-7 py-5 max-[620px]:px-5"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  setIsCreateRequisition(false);
-                }}
-              >
-                <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
-                  <label className="text-[14px] font-medium text-[#a9bfd9]">
-                    Part Name <span className="text-[#ff6557]">*</span>
-                    <input
-                      required
-                      autoFocus
-                      type="text"
-                      placeholder="e.g. PIR Motion Detector"
-                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
-                    />
-                  </label>
-                  <label className="text-[14px] font-medium text-[#a9bfd9]">
-                    Item Code <span className="text-[#ff6557]">*</span>
-                    <input
-                      required
-                      type="text"
-                      placeholder="e.g. DMP-145"
-                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
-                    />
-                  </label>
-                </div>
-                <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
-                  <label className="text-[14px] font-medium text-[#a9bfd9]">
-                    Quantity <span className="text-[#ff6557]">*</span>
-                    <input
-                      required
-                      type="number"
-                      min="0"
-                      placeholder="e.g. 8"
-                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
-                    />
-                  </label>
-                  <label className="text-[14px] font-medium text-[#a9bfd9]">
-                    Category <span className="text-[#ff6557]">*</span>
-                    <select
-                      defaultValue="Intrusion"
-                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
-                    >
-                      <option>Power</option>
-                      <option>Intrusion</option>
-                      <option>Access</option>
-                      <option>CCTV</option>
-                    </select>
-                  </label>
-                </div>
-
-                <div className="mb-4 grid grid-cols-2 gap-4 max-[620px]:grid-cols-1 max-[620px]:gap-3">
-                  <label className="text-[14px] font-medium text-[#a9bfd9]">
-                    Branch <span className="text-[#ff6557]">*</span>
-                    <select
-                      defaultValue="Makati"
-                      className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none focus:border-[#4d88e8]"
-                    >
-                      <option>Makati</option>
-                      <option>Cebu</option>
-                    </select>
-                  </label>
-                </div>
-
-                <fieldset className="mb-4 border-0 p-0">
-                  <legend className="mb-1.5 text-[14px] font-medium text-[#a9bfd9]">
-                    Status
-                  </legend>
-                  <div className="grid grid-cols-2 gap-2 max-[420px]:grid-cols-1">
-                    <button
-                      type="button"
-                      onClick={() => setStatus("In stock")}
-                      className={`h-12 rounded-[10px] border text-[15px] transition-colors ${
-                        status === "In stock"
-                          ? "border-[#4d88e8] bg-[#4d88e8] text-white"
-                          : "border-[#293f5d] bg-[#1d3351] text-[#e5edf8] hover:border-[#4d88e8]"
-                      }`}
-                    >
-                      In stock
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setStatus("Low stock")}
-                      className={`h-12 rounded-[10px] border text-[15px] transition-colors ${
-                        status === "Low stock"
-                          ? "border-[#ff6557] bg-[#ff6557] text-white"
-                          : "border-[#293f5d] bg-[#1d3351] text-[#e5edf8] hover:border-[#ff6557]"
-                      }`}
-                    >
-                      Low stock
-                    </button>
-                  </div>
-                </fieldset>
-
-                <label className="mt-4 block text-[14px] font-medium text-[#a9bfd9]">
-                  Notes / Remarks
-                  <textarea
-                    rows="3"
-                    placeholder="Add supplier information, specifications, or notes..."
-                    className="mt-1.5 w-full resize-y rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 py-3 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
-                  />
-                </label>
-              </form>
-
-              <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-[#293d58] bg-[#172a44] px-7 py-4 max-[620px]:flex-col max-[620px]:items-stretch max-[620px]:px-5">
-                <span className="text-[14px] text-[#91a8c7]">
-                  Requisition Ref: REQ-
-                  {requisitionReference}
-                </span>
-                <div className="flex gap-3 max-[420px]:flex-wrap">
-                  <button
-                    type="button"
-                    onClick={() => setIsCreateRequisition(false)}
-                    className="h-[50px] rounded-[10px] border border-[#293f5d] px-5 text-[14px] text-[#e5edf8] hover:bg-[#1d3351]"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setIsCreateRequisition(false)}
-                    className="h-[50px] rounded-[10px] border border-[#293f5d] px-5 text-[14px] text-[#e5edf8] hover:bg-[#1d3351]"
-                  >
-                    Save draft
-                  </button>
-                  <button
-                    type="submit"
-                    form="create-requisition-form"
-                    className="h-[50px] rounded-[10px] bg-[#4d88e8] px-5 text-[14px] font-semibold text-white hover:bg-[#5b96f4] max-[420px]:flex-1"
-                  >
-                    Create Requisition
-                  </button>
-                </div>
-              </footer>
-            </section>
-          </div>
-        )}
       </section>
+      {isDeletePartOpen && selectedInventoryItem && (
+        <ConfirmPasswordDialog
+          title="Delete inventory part"
+          message={`Delete ${selectedInventoryItem[1]} (${selectedInventoryItem[2]})?`}
+          detail="The part must have no stock on hand. If it has any stock history it will be archived instead — hidden from the catalogue and pickers, but kept in the stock records, where it can be restored from the Archived view."
+          confirmLabel="Delete part"
+          busyLabel="Deleting..."
+          isBusy={isDeletingPart}
+          error={deletePartError}
+          onCancel={() => setIsDeletePartOpen(false)}
+          onConfirm={handleDeletePart}
+        />
+      )}
+      {isManageCategoriesOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-[#071426]/75 p-4 backdrop-blur-[2px] max-[620px]:items-end max-[620px]:p-0"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setIsManageCategoriesOpen(false);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label="Inventory categories"
+            className="flex max-h-[86vh] w-full max-w-[600px] flex-col overflow-hidden rounded-[14px] border border-[#263c5a] bg-[#172a44] text-[#e5edf8] shadow-[0_24px_80px_rgb(0_0_0_/_45%)] max-[620px]:max-h-[92vh] max-[620px]:rounded-b-none max-[620px]:rounded-t-[16px]"
+          >
+            <header className="flex shrink-0 items-start justify-between border-b border-[#293d58] px-6 py-4">
+              <div>
+                <p className="m-0 text-[10px] font-bold uppercase tracking-[.1em] text-[#91a8c7]">
+                  Stock Ledger / Inventory
+                </p>
+                <h2 className="m-0 mt-1 text-[21px] font-bold text-white">
+                  Categories
+                </h2>
+                <p className="m-0 mt-1 text-[12px] text-[#99afc9]">
+                  Each category supplies the prefix for generated item codes.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsManageCategoriesOpen(false)}
+                className="grid h-8 w-8 place-items-center text-[24px] leading-none text-[#91a8c7] hover:text-white"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
+              {categoriesError && (
+                <p className="m-0 mb-3 rounded-[6px] border border-[#7d3b34] bg-[#3a2320] px-3 py-2 text-[12px] text-[#f0b8b0]" role="alert">
+                  {categoriesError}
+                </p>
+              )}
+              {isLoadingCategories ? (
+                <p className="m-0 py-6 text-center text-[12px] text-[#91a8c7]">
+                  Loading categories...
+                </p>
+              ) : categories.length === 0 ? (
+                <p className="m-0 py-6 text-center text-[12px] text-[#91a8c7]">
+                  No categories yet. Create the first one.
+                </p>
+              ) : (
+                <ul className="m-0 list-none space-y-2 p-0">
+                  {categories.map((category) => (
+                    <li
+                      key={category.id}
+                      className="flex flex-wrap items-center gap-2 rounded-[8px] border border-[#293f5d] bg-[#1d3351] px-4 py-3"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <strong className="block truncate text-[14px] text-white">
+                          {category.name}
+                        </strong>
+                        <small className="block text-[11px] text-[#91a8c7]">
+                          {category.partCount}{" "}
+                          {category.partCount === 1 ? "part" : "parts"} · next{" "}
+                          {category.nextSku}
+                        </small>
+                      </span>
+                      <span className="rounded-[5px] border border-[#3a5578] bg-[#22395a] px-2 py-1 font-mono text-[11px] text-[#bcd4fa]">
+                        {category.prefix}
+                      </span>
+                      {!category.active && (
+                        <span className="rounded-full border border-[#7d3b34] px-2 py-0.5 text-[9px] font-bold text-[#f0b8b0]">
+                          Inactive
+                        </span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => openEditCategory(category)}
+                        className="h-8 rounded-[6px] border border-[#3a5578] px-3 text-[11px] font-semibold text-[#bcd4fa] hover:bg-[#22395a]"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleCategory(category)}
+                        className="h-8 rounded-[6px] border border-[#3a5578] px-3 text-[11px] font-semibold text-[#91a8c7] hover:bg-[#22395a]"
+                      >
+                        {category.active ? "Deactivate" : "Activate"}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-[#293d58] px-6 py-4">
+              <button
+                type="button"
+                onClick={openNewCategory}
+                className="h-10 rounded-[6px] bg-[#4d88e8] px-4 text-[12px] font-semibold text-white hover:bg-[#5b96f4]"
+              >
+                + New category
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsManageCategoriesOpen(false)}
+                className="h-10 rounded-[6px] border border-[#293f5d] px-4 text-[12px] text-[#e5edf8] hover:bg-[#1d3351]"
+              >
+                Done
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {isCategoryDialogOpen && (
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-[#071426]/75 p-4 backdrop-blur-[2px] max-[620px]:items-end max-[620px]:p-0"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isSavingCategory) {
+              setIsCategoryDialogOpen(false);
+            }
+          }}
+        >
+          <form
+            onSubmit={handleSaveCategory}
+            role="dialog"
+            aria-modal="true"
+            aria-label={editingCategory ? "Edit category" : "New category"}
+            className="w-full max-w-[460px] rounded-[14px] border border-[#263c5a] bg-[#172a44] p-6 text-[#e5edf8] shadow-[0_24px_80px_rgb(0_0_0_/_45%)] max-[620px]:rounded-b-none max-[620px]:rounded-t-[16px]"
+          >
+            <h2 className="m-0 text-[20px] font-bold text-white">
+              {editingCategory ? "Edit category" : "New category"}
+            </h2>
+            <p className="m-0 mt-1 text-[12px] text-[#99afc9]">
+              The prefix is used to generate item codes such as DMP-001.
+            </p>
+
+            <label className="mt-4 block text-[13px] font-medium text-[#a9bfd9]">
+              Name <span className="text-[#ff6557]">*</span>
+              <input
+                autoFocus
+                required
+                value={categoryFormName}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setCategoryFormName(value);
+                  if (!categoryPrefixEdited) {
+                    setCategoryFormPrefix(
+                      suggestPrefix(
+                        value,
+                        categories.map((category) => category.prefix),
+                      ),
+                    );
+                  }
+                }}
+                placeholder="e.g. Door Magnetic Contact"
+                className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+              />
+            </label>
+
+            <label className="mt-3 block text-[13px] font-medium text-[#a9bfd9]">
+              Code prefix <span className="text-[#ff6557]">*</span>
+              <input
+                required
+                value={categoryFormPrefix}
+                onChange={(event) => {
+                  setCategoryFormPrefix(normalisePrefix(event.target.value));
+                  setCategoryPrefixEdited(true);
+                }}
+                maxLength={6}
+                placeholder="e.g. DMP"
+                className="mt-1.5 h-12 w-full rounded-[10px] border border-[#293f5d] bg-[#1d3351] px-4 text-[15px] uppercase tracking-[.08em] text-white outline-none placeholder:text-[#7188a4] focus:border-[#4d88e8]"
+              />
+              <small className="mt-1 block text-[11px] text-[#91a8c7]">
+                2–6 letters or digits. Next code:{" "}
+                <strong className="text-[#bcd4fa]">
+                  {isValidPrefix(categoryFormPrefix)
+                    ? nextSku(
+                        inventoryRecords.map((record) => record[2]),
+                        categoryFormPrefix,
+                      )
+                    : "—"}
+                </strong>
+                {editingCategory
+                  ? " · existing item codes keep their number"
+                  : ""}
+              </small>
+            </label>
+
+            {categoryFormError && (
+              <p
+                className="m-0 mt-3 rounded-[6px] border border-[#7d3b34] bg-[#3a2320] px-3 py-2 text-[12px] text-[#f0b8b0]"
+                role="alert"
+              >
+                {categoryFormError}
+              </p>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCategoryDialogOpen(false)}
+                disabled={isSavingCategory}
+                className="h-10 rounded-[6px] border border-[#293f5d] px-4 text-[12px] text-[#e5edf8] hover:bg-[#1d3351] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={isSavingCategory}
+                className="h-10 rounded-[6px] bg-[#4d88e8] px-4 text-[12px] font-semibold text-white hover:bg-[#5b96f4] disabled:opacity-50"
+              >
+                {isSavingCategory
+                  ? "Saving..."
+                  : editingCategory
+                    ? "Save category"
+                    : "Create category"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </main>
   );
 }

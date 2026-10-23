@@ -9,6 +9,7 @@ import JobTemplates from "./components/JobTemplates.jsx";
 import FieldReports from "./components/FieldReports.jsx";
 import ReportsOverview from "./components/ReportsOverview.jsx";
 import Account from "./components/Account.jsx";
+import AuditLog from "./components/AuditLog.jsx";
 import Settings from "./components/Settings.jsx";
 import ForgotPassword from "./components/ForgotPassword.jsx";
 import { Navigate, Route, Routes } from "react-router-dom";
@@ -51,6 +52,7 @@ function App() {
       <Route path="/reports/new" element={<ProtectedRoute module="field_reporting"><FieldReports /></ProtectedRoute>} />
       <Route path="/account" element={<ProtectedRoute module="admin"><Account /></ProtectedRoute>} />
       <Route path="/account/new" element={<ProtectedRoute module="admin"><Account /></ProtectedRoute>} />
+      <Route path="/audit" element={<ProtectedRoute module="admin"><AuditLog /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
     </Routes>

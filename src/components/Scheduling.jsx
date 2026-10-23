@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { callAuthFunction, getSession } from "../lib/auth.js";
+import ConfirmPasswordDialog from "./ConfirmPasswordDialog.jsx";
 
 function formatDateRange(startDate, endDate) {
   const startMonth = startDate.toLocaleString("en-US", { month: "long" });
@@ -100,7 +101,7 @@ function getJobStage({ status, partsStatus, assignmentConfirmed }) {
   if (assignmentConfirmed) {
     return { label: "Pending", style: STAGE_STYLES.waiting };
   }
-  return { label: "Waiting confirmation", style: STAGE_STYLES.todo };
+  return { label: "Draft", style: STAGE_STYLES.todo };
 }
 
 function formatShortDate(dateValue) {
@@ -158,6 +159,10 @@ function Scheduling() {
     }
   });
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Arriving from the dashboard's "Draft jobs" card: show every draft, whatever
+  // week it falls in, instead of the current week's slice.
+  const draftsOnly = searchParams.get("drafts") === "1";
   // State to manage active view mode ('list' | 'calendar')
   const [viewMode, setViewMode] = useState("list");
   const [rangeStart, setRangeStart] = useState(getToday);
@@ -165,6 +170,10 @@ function Scheduling() {
   // Day-of-week filter for the weekly list. null shows the whole week.
   const [dayFilter, setDayFilter] = useState(null);
   const [isConfirmingAssignment, setIsConfirmingAssignment] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState("");
+  const [isDeletingDraft, setIsDeletingDraft] = useState(false);
+  const [deleteDraftError, setDeleteDraftError] = useState("");
+  const [scheduleReloadToken, setScheduleReloadToken] = useState(0);
   const [confirmError, setConfirmError] = useState({ order: "", message: "" });
 
   useEffect(() => {
@@ -184,7 +193,7 @@ function Scheduling() {
     return () => {
       isMounted = false;
     };
-  }, [confirmedAssignmentsKey]);
+  }, [confirmedAssignmentsKey, scheduleReloadToken]);
 
   // Weekly list range: the Sunday-Saturday week containing the anchored date.
   const weekStart = new Date(
@@ -200,10 +209,12 @@ function Scheduling() {
   const isCurrentWeek =
     getDateKey(getToday()) >= getDateKey(weekStart) &&
     getDateKey(getToday()) <= getDateKey(weekEnd);
-  const scheduledJobsInRange = schedule.filter((job) => {
-    const jobDate = scheduledJobDates[job[3]];
-    return jobDate >= weekStart && jobDate <= weekEnd;
-  });
+  const scheduledJobsInRange = draftsOnly
+    ? schedule.filter((job) => !job[13] && job[12] === "pending")
+    : schedule.filter((job) => {
+        const jobDate = scheduledJobDates[job[3]];
+        return jobDate >= weekStart && jobDate <= weekEnd;
+      });
   const weekDays = Array.from({ length: 7 }, (_, index) =>
     new Date(
       weekStart.getFullYear(),
@@ -211,11 +222,13 @@ function Scheduling() {
       weekStart.getDate() + index,
     ),
   );
-  const listJobs = dayFilter
-    ? scheduledJobsInRange.filter(
-        (job) => getDateKey(scheduledJobDates[job[3]]) === dayFilter,
-      )
-    : scheduledJobsInRange;
+  const listJobs = draftsOnly
+    ? scheduledJobsInRange
+    : dayFilter
+      ? scheduledJobsInRange.filter(
+          (job) => getDateKey(scheduledJobDates[job[3]]) === dayFilter,
+        )
+      : scheduledJobsInRange;
   const calendarMonthStart = new Date(
     rangeStart.getFullYear(),
     rangeStart.getMonth(),
@@ -336,6 +349,9 @@ function Scheduling() {
   // moment between confirming and the next schedule refresh.
   const isAssignmentConfirmed =
     Boolean(jobAssignmentConfirmedAt) || confirmedAssignments.has(jobOrder);
+  // Draft = unconfirmed and nothing allocated yet. Only drafts may be deleted.
+  const isDraftUnallocated =
+    !isAssignmentConfirmed && jobPartsStatus === "pending";
   const selectedJobStage = getJobStage({
     status: jobStatus,
     partsStatus: jobPartsStatus,
@@ -363,6 +379,25 @@ function Scheduling() {
     );
     setIsConfirmingAssignment(false);
     navigate(`/inventory/allocate?job=${encodeURIComponent(order)}`);
+  }
+
+  async function handleDeleteDraft(password) {
+    if (!deleteTarget) return;
+    setDeleteDraftError("");
+    setIsDeletingDraft(true);
+    try {
+      await callAuthFunction("delete-job", {
+        jobNumber: deleteTarget,
+        password,
+      });
+      setDeleteTarget("");
+      setSelectedOrder("");
+      setScheduleReloadToken((token) => token + 1);
+    } catch (error) {
+      setDeleteDraftError(error.message);
+    } finally {
+      setIsDeletingDraft(false);
+    }
   }
 
   return (
@@ -424,18 +459,22 @@ function Scheduling() {
                   </button>
                   <div>
                     <strong className="text-[15px] max-[1024px]:text-[12px] max-[620px]:text-[11px]">
-                      {viewMode === "calendar"
-                        ? formatMonthLabel(calendarMonthStart)
-                        : formatDateRange(weekStart, weekEnd)}
+                      {draftsOnly
+                        ? "Draft jobs"
+                        : viewMode === "calendar"
+                          ? formatMonthLabel(calendarMonthStart)
+                          : formatDateRange(weekStart, weekEnd)}
                     </strong>
                     <small className="block text-[10px] text-[#8f989f] max-[1024px]:text-[8px]">
-                      {viewMode === "calendar"
-                        ? `${scheduledJobsInCalendarMonth.length} jobs scheduled this month`
-                        : dayFilter
-                          ? `${formatSelectedDate(new Date(`${dayFilter}T00:00:00`)).split(",")[0]} · ${listJobs.length} ${listJobs.length === 1 ? "job" : "jobs"}`
-                          : isCurrentWeek
-                            ? `This week · ${listJobs.length} jobs scheduled`
-                            : `Week · ${listJobs.length} jobs scheduled`}
+                      {draftsOnly
+                        ? `${listJobs.length} awaiting confirmation`
+                        : viewMode === "calendar"
+                          ? `${scheduledJobsInCalendarMonth.length} jobs scheduled this month`
+                          : dayFilter
+                            ? `${formatSelectedDate(new Date(`${dayFilter}T00:00:00`)).split(",")[0]} · ${listJobs.length} ${listJobs.length === 1 ? "job" : "jobs"}`
+                            : isCurrentWeek
+                              ? `This week · ${listJobs.length} jobs scheduled`
+                              : `Week · ${listJobs.length} jobs scheduled`}
                     </small>
                   </div>
                   <button
@@ -454,7 +493,7 @@ function Scheduling() {
                   </button>
 
                   {/* Day-of-week filter (list view only) */}
-                  {viewMode === "list" && (
+                  {viewMode === "list" && !draftsOnly && (
                     <div className="flex items-center gap-1 max-[620px]:w-full max-[620px]:justify-between">
                       {weekDays.map((date) => {
                         const dateKey = getDateKey(date);
@@ -777,7 +816,7 @@ function Scheduling() {
                   </p>
                 </div>
                 <div className="flex flex-none items-center gap-2">
-                  {jobOrder && (
+                  {jobOrder && isDraftUnallocated && (
                     <button
                       type="button"
                       onClick={() =>
@@ -862,6 +901,21 @@ function Scheduling() {
                       ? "Continue to inventory request"
                       : "Confirm assignment"}
               </button>
+              {isDraftUnallocated && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDeleteDraftError("");
+                    setDeleteTarget(jobOrder);
+                  }}
+                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-[6px] border border-[#e2b4ad] bg-white py-2.5 text-[11px] font-bold text-[#b33a3a] hover:bg-[#fff3f1] max-[1024px]:py-2 max-[1024px]:text-[8px]"
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    delete
+                  </span>
+                  Delete draft
+                </button>
+              )}
               {confirmError.message && confirmError.order === jobOrder && (
                 <p
                   className="m-0 mt-2 rounded-[6px] border border-[#f0b8b0] bg-[#fff1ee] px-3 py-2 text-[11px] text-[#b64132]"
@@ -879,6 +933,19 @@ function Scheduling() {
         </div>
       </section>
 
+      {deleteTarget && (
+        <ConfirmPasswordDialog
+          title="Delete draft job"
+          message={`Delete ${deleteTarget}? Its draft quotation and technician assignments will be removed too.`}
+          detail="Only a draft can be deleted. Once a job is confirmed it must be cancelled instead, so its history stays intact."
+          confirmLabel="Delete draft"
+          busyLabel="Deleting..."
+          isBusy={isDeletingDraft}
+          error={deleteDraftError}
+          onCancel={() => setDeleteTarget("")}
+          onConfirm={handleDeleteDraft}
+        />
+      )}
     </main>
   );
 }

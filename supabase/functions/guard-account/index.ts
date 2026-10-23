@@ -16,7 +16,16 @@ const headers = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
   "Content-Type": "application/json",
 };
-const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { autoRefreshToken: false, persistSession: false } });
+const supabaseAdmin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { autoRefreshToken: false, persistSession: false } });
+
+// Audit triggers read the actor from the x-guard-actor header, so writes made
+// after authentication use a client tagged with the signed-in user.
+function createRequestClient(actorId: string) {
+  return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, {
+    auth: { autoRefreshToken: false, persistSession: false },
+    global: { headers: { "x-guard-actor": actorId } },
+  });
+}
 const permissions: Record<string, Array<[string, string]>> = {
   Admin: [["scheduling", "approve"], ["inventory", "approve"], ["field_reporting", "approve"], ["sales_billing", "approve"], ["admin", "approve"]],
   "Service Manager": [["scheduling", "edit"], ["field_reporting", "edit"]],
@@ -46,7 +55,7 @@ async function verifyToken(request: Request) {
   // A valid signature alone is not enough: the account must still be active, and
   // the role is read from the database so deactivation or a role change applies
   // immediately instead of only after the token expires.
-  const { data: account, error } = await supabase
+  const { data: account, error } = await supabaseAdmin
     .from("users")
     .select("is_active, roles(role_name)")
     .eq("user_id", payload.sub)
@@ -56,14 +65,16 @@ async function verifyToken(request: Request) {
   const role = Array.isArray(account.roles) ? account.roles[0]?.role_name : account.roles?.role_name;
   return { ...payload, role: role ?? payload.role };
 }
-async function roleId(roleName: string) { const existing = await supabase.from("roles").select("role_id").eq("role_name", roleName).maybeSingle(); if (existing.error) throw existing.error; if (existing.data) return existing.data.role_id; const created = await supabase.from("roles").insert({ role_name: roleName }).select("role_id").single(); if (created.error) throw created.error; return created.data.role_id; }
+async function roleId(roleName: string, db = supabaseAdmin) { const existing = await db.from("roles").select("role_id").eq("role_name", roleName).maybeSingle(); if (existing.error) throw existing.error; if (existing.data) return existing.data.role_id; const created = await db.from("roles").insert({ role_name: roleName }).select("role_id").single(); if (created.error) throw created.error; return created.data.role_id; }
 Deno.serve(async (request: Request) => {
+  let db = supabaseAdmin;
   if (request.method === "OPTIONS") return new Response("ok", { headers });
   try {
     const body = await request.json();
     const session = await verifyToken(request);
     if (!session) return response({ error: "You must be signed in to perform this action." }, 401);
     if (session.role !== "Admin") return response({ error: "Administrator access is required." }, 403);
+    db = createRequestClient(String(session.sub));
 
     if (body.action === "create-account") {
       const firstName = String(body.firstName ?? "").trim();
@@ -73,17 +84,17 @@ Deno.serve(async (request: Request) => {
       const role = String(body.role ?? "");
       const branch = String(body.branch ?? "").trim().toLowerCase();
       if (!firstName || !lastName || !email || password.length < 8 || !permissions[role] || !["makati", "cebu"].includes(branch)) return response({ error: "Please provide valid account details." }, 400);
-      const existing = await supabase.from("users").select("user_id, is_active").eq("email", email).maybeSingle();
+      const existing = await db.from("users").select("user_id, is_active").eq("email", email).maybeSingle();
       if (existing.error) throw existing.error;
-      const role_id = await roleId(role);
+      const role_id = await roleId(role, db);
       let user;
       if (existing.data?.is_active) return response({ error: "An account with this email address already exists." }, 409);
       if (existing.data) {
-        const updated = await supabase.from("users").update({ first_name: firstName, last_name: lastName, password_hash: await passwordHash(password), role_id, branch, is_active: true, updated_at: new Date().toISOString() }).eq("user_id", existing.data.user_id).select("user_id, first_name, last_name, email, branch, is_active, created_at, roles(role_name)").single();
+        const updated = await db.from("users").update({ first_name: firstName, last_name: lastName, password_hash: await passwordHash(password), role_id, branch, is_active: true, updated_at: new Date().toISOString() }).eq("user_id", existing.data.user_id).select("user_id, first_name, last_name, email, branch, is_active, created_at, roles(role_name)").single();
         if (updated.error) throw updated.error;
         user = updated.data;
       } else {
-        const created = await supabase.from("users").insert({ first_name: firstName, last_name: lastName, email, password_hash: await passwordHash(password), role_id, branch }).select("user_id, first_name, last_name, email, branch, is_active, created_at, roles(role_name)").single();
+        const created = await db.from("users").insert({ first_name: firstName, last_name: lastName, email, password_hash: await passwordHash(password), role_id, branch }).select("user_id, first_name, last_name, email, branch, is_active, created_at, roles(role_name)").single();
         if (created.error) throw created.error;
         user = created.data;
       }
@@ -94,10 +105,10 @@ Deno.serve(async (request: Request) => {
       const currentPassword = String(body.currentPassword ?? "");
       const newPassword = String(body.newPassword ?? "");
       if (newPassword.length < 8) return response({ error: "The new password must be at least 8 characters." }, 400);
-      const user = await supabase.from("users").select("password_hash").eq("user_id", session.sub).maybeSingle();
+      const user = await db.from("users").select("password_hash").eq("user_id", session.sub).maybeSingle();
       if (user.error) throw user.error;
       if (!user.data || !(await verifyPassword(currentPassword, user.data.password_hash))) return response({ error: "Your current password is incorrect." }, 401);
-      const updated = await supabase.from("users").update({ password_hash: await passwordHash(newPassword), updated_at: new Date().toISOString() }).eq("user_id", session.sub);
+      const updated = await db.from("users").update({ password_hash: await passwordHash(newPassword), updated_at: new Date().toISOString() }).eq("user_id", session.sub);
       if (updated.error) throw updated.error;
       return response({ message: "Password updated successfully." });
     }

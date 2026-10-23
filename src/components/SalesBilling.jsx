@@ -3,6 +3,12 @@ import { Link, useNavigate } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { callAuthFunction } from "../lib/auth.js";
+import {
+  buildBillingBreakdown,
+  filterInvoicesByPeriod,
+  periodLabel,
+  summariseInvoices,
+} from "../lib/billing.js";
 
 const formatPeso = (value) =>
   `₱${Number(value || 0).toLocaleString("en-PH", {
@@ -67,6 +73,11 @@ function SalesBilling() {
   const [expandedId, setExpandedId] = useState("");
   const [paymentInvoice, setPaymentInvoice] = useState(null);
   const [reloadToken, setReloadToken] = useState(0);
+  // Period filter: All time by default so the page is unchanged until it is used.
+  const [periodMode, setPeriodMode] = useState("all");
+  const [periodMonth, setPeriodMonth] = useState(() => todayKey().slice(0, 7));
+  const [periodYear, setPeriodYear] = useState(() => todayKey().slice(0, 4));
+  const [isBreakdownOpen, setIsBreakdownOpen] = useState(true);
 
   useEffect(() => {
     let isCurrent = true;
@@ -87,9 +98,17 @@ function SalesBilling() {
     };
   }, [reloadToken]);
 
+  const periodValue =
+    periodMode === "month" ? periodMonth : periodMode === "year" ? periodYear : "";
+
+  const periodInvoices = useMemo(
+    () => filterInvoicesByPeriod(invoices, { mode: periodMode, value: periodValue }),
+    [invoices, periodMode, periodValue],
+  );
+
   const visibleInvoices = useMemo(() => {
     const query = search.trim().toLowerCase();
-    return invoices.filter((invoice) => {
+    return periodInvoices.filter((invoice) => {
       const matchesTab =
         filterTab === "all" ||
         invoice.status === filterTab ||
@@ -101,18 +120,31 @@ function SalesBilling() {
           .includes(query);
       return matchesTab && matchesSearch;
     });
-  }, [invoices, filterTab, search]);
+  }, [periodInvoices, filterTab, search]);
 
-  const summary = useMemo(() => {
-    const active = invoices.filter((invoice) => invoice.status !== "cancelled");
-    return {
-      invoiced: active.reduce((sum, invoice) => sum + invoice.totalAmount, 0),
-      collected: active.reduce((sum, invoice) => sum + invoice.paidAmount, 0),
-      outstanding: active.reduce((sum, invoice) => sum + invoice.balance, 0),
-      openCount: active.filter((invoice) => invoice.balance > 0).length,
-      count: active.length,
-    };
-  }, [invoices]);
+  // Collected counts payments against this period's invoices, so the three
+  // figures always reconcile.
+  const summary = useMemo(() => summariseInvoices(periodInvoices), [periodInvoices]);
+
+  const availableYears = useMemo(() => {
+    const years = new Set(
+      invoices
+        .filter((invoice) => invoice.status !== "cancelled")
+        .map((invoice) => String(invoice.issueDate ?? "").slice(0, 4))
+        .filter(Boolean),
+    );
+    years.add(periodYear);
+    years.add(todayKey().slice(0, 4));
+    return [...years].sort().reverse();
+  }, [invoices, periodYear]);
+
+  // The breakdown follows the filter's granularity: yearly when Year is chosen,
+  // monthly otherwise.
+  const breakdownMode = periodMode === "year" ? "year" : "month";
+  const breakdown = useMemo(
+    () => buildBillingBreakdown(invoices, { mode: breakdownMode }),
+    [invoices, breakdownMode],
+  );
 
   const metricCards = [
     {
@@ -176,6 +208,71 @@ function SalesBilling() {
             </div>
           </div>
 
+          <div className="mb-4 flex flex-wrap items-center gap-2">
+            <div className="flex rounded-full border border-[#dfe4e8] bg-[#f8fafc] p-1 text-[10px]">
+              {[
+                { id: "all", label: "All time" },
+                { id: "month", label: "Month" },
+                { id: "year", label: "Year" },
+              ].map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setPeriodMode(option.id)}
+                  className={`rounded-full px-3 py-1 ${
+                    periodMode === option.id
+                      ? "bg-white font-bold text-[#174f9a] shadow-sm"
+                      : "text-[#87929d]"
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+
+            {periodMode === "month" && (
+              <input
+                type="month"
+                value={periodMonth}
+                onChange={(event) => {
+                  if (event.target.value) setPeriodMonth(event.target.value);
+                }}
+                aria-label="Invoice month"
+                className="h-8 rounded-[6px] border border-[#d9dfe4] bg-white px-3 text-[11px] text-[#174f9a] outline-none focus:border-[#1250a0]"
+              />
+            )}
+            {periodMode === "year" && (
+              <select
+                value={periodYear}
+                onChange={(event) => setPeriodYear(event.target.value)}
+                aria-label="Invoice year"
+                className="h-8 rounded-[6px] border border-[#d9dfe4] bg-white px-3 text-[11px] text-[#174f9a] outline-none focus:border-[#1250a0]"
+              >
+                {availableYears.map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+            )}
+
+            <span className="text-[11px] text-[#8b949c]">
+              {periodMode === "all"
+                ? "All invoices"
+                : `Showing ${periodLabel(periodMode, periodValue)} · ${summary.count} ${
+                    summary.count === 1 ? "invoice" : "invoices"
+                  }`}
+            </span>
+
+            <button
+              type="button"
+              onClick={() => setIsBreakdownOpen((open) => !open)}
+              className="ml-auto rounded-[6px] border border-[#d9dfe4] bg-white px-3 py-1.5 text-[10px] font-bold text-[#5e6b78] hover:bg-[#f4f6f8]"
+            >
+              {isBreakdownOpen ? "Hide breakdown" : "Show breakdown"}
+            </button>
+          </div>
+
           <section className="grid grid-cols-3 gap-[18px] max-[620px]:gap-1">
             {metricCards.map(({ icon, title, value, note, alert }) => (
               <article
@@ -207,6 +304,78 @@ function SalesBilling() {
               </article>
             ))}
           </section>
+
+          {isBreakdownOpen && (
+            <section className="mt-5 overflow-hidden rounded-[11px] border border-[#dfe6ec] bg-white shadow-[0_3px_8px_rgb(31_59_82_/_14%)]">
+              <header className="flex flex-wrap items-center justify-between gap-2 border-b border-[#e1e6eb] px-7 py-4 max-[620px]:px-3">
+                <div>
+                  <p className="m-0 text-[10px] font-bold uppercase tracking-[.12em] text-[#777e85]">
+                    {breakdownMode === "year" ? "YEARLY TOTALS" : "MONTHLY TOTALS"}
+                  </p>
+                  <h2 className="m-0 mt-1 text-[17px] font-bold text-[#063b7c] max-[620px]:text-[13px]">
+                    Billing breakdown
+                  </h2>
+                </div>
+                <span className="text-[10px] text-[#8b949c]">
+                  Click a period to filter the register
+                </span>
+              </header>
+              <div className="grid grid-cols-[1.2fr_.7fr_1fr_1fr_1fr] items-center bg-[#fafafa] px-7 py-2.5 text-[10px] font-bold uppercase tracking-[.08em] text-[#77818a] max-[620px]:grid-cols-[1.1fr_1fr_1fr] max-[620px]:[&>span:nth-child(2)]:hidden max-[620px]:[&>span:nth-child(5)]:hidden max-[620px]:px-3">
+                <span>Period</span>
+                <span>Invoices</span>
+                <span>Invoiced</span>
+                <span>Collected</span>
+                <span>Outstanding</span>
+              </div>
+              {breakdown.length === 0 ? (
+                <p className="m-0 px-7 py-6 text-center text-[12px] text-[#8d969e]">
+                  No invoices have been issued yet.
+                </p>
+              ) : (
+                breakdown.map((row) => {
+                  const isActive = periodMode !== "all" && periodValue === row.key;
+                  return (
+                    <button
+                      key={row.key}
+                      type="button"
+                      onClick={() => {
+                        if (breakdownMode === "year") {
+                          setPeriodMode("year");
+                          setPeriodYear(row.key);
+                        } else {
+                          setPeriodMode("month");
+                          setPeriodMonth(row.key);
+                        }
+                      }}
+                      className={`grid w-full grid-cols-[1.2fr_.7fr_1fr_1fr_1fr] items-center border-t border-[#e4e8eb] px-7 py-2.5 text-left text-[11px] transition-colors hover:bg-[#f8fbff] max-[620px]:grid-cols-[1.1fr_1fr_1fr] max-[620px]:[&>*:nth-child(2)]:hidden max-[620px]:[&>*:nth-child(5)]:hidden max-[620px]:px-3 ${
+                        isActive ? "bg-[#eef4ff]" : ""
+                      }`}
+                    >
+                      <strong className="truncate text-[#174f9a]">
+                        {row.label}
+                      </strong>
+                      <span className="text-[#607286]">{row.count}</span>
+                      <span className="text-[#263747]">
+                        {formatPeso(row.invoiced)}
+                      </span>
+                      <span className="text-[#263747]">
+                        {formatPeso(row.collected)}
+                      </span>
+                      <span
+                        className={
+                          row.outstanding > 0
+                            ? "font-bold text-[#f05b48]"
+                            : "text-[#263747]"
+                        }
+                      >
+                        {formatPeso(row.outstanding)}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
+            </section>
+          )}
 
           <section className="mt-5 overflow-hidden rounded-[11px] border border-[#dfe6ec] bg-white shadow-[0_3px_8px_rgb(31_59_82_/_14%)] max-[620px]:mt-3">
             <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e1e6eb] px-7 py-5 max-[620px]:px-3 max-[620px]:py-3">
@@ -268,17 +437,29 @@ function SalesBilling() {
               <div className="py-12 text-center text-[13px] text-[#8e959b]">
                 Loading invoices...
               </div>
+            ) : invoices.length === 0 ? (
+              <div className="px-6 py-12 text-center text-[13px] text-[#8d969e]">
+                <p className="m-0 font-bold text-[#5e6b78]">No invoices yet.</p>
+                <p className="m-0 mt-1 text-[12px]">
+                  Create one from an approved field report.
+                </p>
+              </div>
+            ) : periodInvoices.length === 0 ? (
+              <div className="px-6 py-12 text-center text-[13px] text-[#8d969e]">
+                <p className="m-0 font-bold text-[#5e6b78]">
+                  No invoices were issued {periodLabel(periodMode, periodValue)}.
+                </p>
+                <p className="m-0 mt-1 text-[12px]">
+                  Pick another period or switch back to All time.
+                </p>
+              </div>
             ) : visibleInvoices.length === 0 ? (
               <div className="px-6 py-12 text-center text-[13px] text-[#8d969e]">
                 <p className="m-0 font-bold text-[#5e6b78]">
-                  {invoices.length === 0
-                    ? "No invoices yet."
-                    : "No invoices match the current filter."}
+                  No invoices match the current filter.
                 </p>
                 <p className="m-0 mt-1 text-[12px]">
-                  {invoices.length === 0
-                    ? "Create one from an approved field report."
-                    : "Clear the search or switch back to All."}
+                  Clear the search or switch back to All.
                 </p>
               </div>
             ) : (
@@ -451,7 +632,7 @@ function SalesBilling() {
                 copied automatically.
               </span>
               <span>
-                {visibleInvoices.length} of {invoices.length} shown
+                {visibleInvoices.length} of {periodInvoices.length} shown
               </span>
             </footer>
           </section>
