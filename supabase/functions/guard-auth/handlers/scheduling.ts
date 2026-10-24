@@ -1,5 +1,5 @@
 import { response, supabaseAdmin } from "../shared.ts";
-import { jobTypeFor, serviceLabelFor } from "../domain.ts";
+import { invoiceStatusFor, jobTypeFor, serviceLabelFor } from "../domain.ts";
 import { branchScope, passwordConfirmationError, scopedBranch } from "../auth.ts";
 
 export async function ensureTechnicianRecord(user: Record<string, unknown>, db = supabaseAdmin) {
@@ -67,7 +67,7 @@ export async function hasOnlyActiveTechnicianRole(technicianIds: string[]) {
 export async function listSchedules(branch: string | null = null) {
   let query = supabaseAdmin
     .from("jobs")
-    .select("job_id, job_number, job_type, status, branch, scheduled_date, scheduled_time, scheduled_end_time, parts_status, assignment_confirmed_at, site_address, quotation_id, clients(name, address), job_technicians(technician_id, is_active, technicians(users(first_name, last_name)))")
+    .select("job_id, job_number, job_type, status, branch, scheduled_date, scheduled_time, scheduled_end_time, parts_status, assignment_confirmed_at, site_address, quotation_id, clients(name, address), job_technicians(technician_id, is_active, technicians(users(first_name, last_name))), invoices!invoices_job_id_fkey(invoice_number, status, due_date, total_amount, created_at)")
     .neq("status", "cancelled");
   if (branch !== null) query = query.eq("branch", branch);
   const { data: jobs, error } = await query
@@ -88,6 +88,13 @@ export async function listSchedules(branch: string | null = null) {
     const client = Array.isArray(job.clients) ? job.clients[0] : job.clients;
     const time = String(job.scheduled_time ?? "").slice(0, 5);
     const date = String(job.scheduled_date);
+    // A cancelled invoice is history; the live one is what the badge follows.
+    const invoice =
+      (Array.isArray(job.invoices) ? job.invoices : job.invoices ? [job.invoices] : [])
+        .filter((entry: any) => entry?.status !== "cancelled")
+        .sort((left: any, right: any) =>
+          String(left.created_at ?? "").localeCompare(String(right.created_at ?? "")),
+        )[0] ?? null;
     return {
       id: job.job_id,
       order: job.job_number,
@@ -104,6 +111,15 @@ export async function listSchedules(branch: string | null = null) {
       stock: "Available",
       partsStatus: job.parts_status,
       assignmentConfirmedAt: job.assignment_confirmed_at,
+      // An issued invoice closes the job as far as the board is concerned; the
+      // status column stays "scheduled" because nothing writes it after insert.
+      invoice: invoice
+        ? {
+            number: invoice.invoice_number,
+            status: invoiceStatusFor(invoice),
+            total: Number(invoice.total_amount) || 0,
+          }
+        : null,
       // A draft is an unconfirmed job whose parts have not been allocated yet.
       // Legacy jobs that predate the confirmation step stay out of this bucket.
       isDraft: !job.assignment_confirmed_at && job.parts_status === "pending",

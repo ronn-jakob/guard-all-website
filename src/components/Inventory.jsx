@@ -99,11 +99,7 @@ function Inventory() {
   // Branch dropdown & filtering state
   const [selectedBranch, setSelectedBranch] = useState(isAdmin ? "All branches" : accountBranchLabel);
   const branchBeforeJobAllocation = useRef("All branches");
-  const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
-  const branchDropdownRef = useRef(null);
   const [selectedCategory, setSelectedCategory] = useState("All categories");
-  const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
-  const categoryDropdownRef = useRef(null);
   const [searchTerm, setSearchTerm] = useState("");
   // Archived parts keep their history but leave the working catalogue.
   const [inventoryStatus, setInventoryStatus] = useState("active");
@@ -371,23 +367,6 @@ function Inventory() {
     };
   }, [allocationJobNumber, isAllocationRoute, isJobAllocation, navigate, inventoryStatus]);
   /* eslint-enable react-hooks/set-state-in-effect */
-
-  // Close branch dropdown on outside click
-  useEffect(() => {
-    function handleClickOutside(event) {
-      if (
-        branchDropdownRef.current &&
-        !branchDropdownRef.current.contains(event.target) &&
-        categoryDropdownRef.current &&
-        !categoryDropdownRef.current.contains(event.target)
-      ) {
-        setIsBranchDropdownOpen(false);
-        setIsCategoryDropdownOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   // The deep link (/inventory/allocate?job=...) never sets showJobCards, so
   // allocation mode has to follow the route as well; otherwise the row controls
@@ -757,9 +736,7 @@ function Inventory() {
                 accountBranchLabel={accountBranchLabel}
                 actionError={actionError}
                 availableQuantities={availableQuantities}
-                branchDropdownRef={branchDropdownRef}
                 branchOptions={branchOptions}
-                categoryDropdownRef={categoryDropdownRef}
                 categoryFilterOptions={categoryFilterOptions}
                 filteredInventoryItems={filteredInventoryItems}
                 handleAcceptJobStock={handleAcceptJobStock}
@@ -774,8 +751,6 @@ function Inventory() {
                 isAllocatingForJob={isAllocatingForJob}
                 isAllocatingStock={isAllocatingStock}
                 isAllocationRoute={isAllocationRoute}
-                isBranchDropdownOpen={isBranchDropdownOpen}
-                isCategoryDropdownOpen={isCategoryDropdownOpen}
                 isLoadingInventory={isLoadingInventory}
                 issueQuantities={issueQuantities}
                 jobAllocation={jobAllocation}
@@ -794,8 +769,6 @@ function Inventory() {
                 selectedJobId={selectedJobId}
                 setActionError={setActionError}
                 setInventoryStatus={setInventoryStatus}
-                setIsBranchDropdownOpen={setIsBranchDropdownOpen}
-                setIsCategoryDropdownOpen={setIsCategoryDropdownOpen}
                 setSearchTerm={setSearchTerm}
                 setSelectedBranch={setSelectedBranch}
                 setSelectedCategory={setSelectedCategory}

@@ -1,6 +1,6 @@
 import { response, supabaseAdmin } from "../shared.ts";
 import { branchScope } from "../auth.ts";
-import { serviceLabelFor } from "../domain.ts";
+import { invoiceStatusFor, serviceLabelFor } from "../domain.ts";
 import { getCurrentTechnicianId } from "./scheduling.ts";
 import {
   ATTACHMENT_BUCKET,
@@ -76,7 +76,25 @@ export async function listFieldReports(session: Record<string, unknown>, request
 
   if (error) throw error;
 
+  // Billing closes a report out of the review queue. The invoice references one
+  // report, but a job can hold several technician reports, so the state is
+  // resolved per job: every sibling report on an invoiced job reads as billed.
   const reportedJobIds = new Set((reports ?? []).map((report: any) => report.job_id));
+  const invoiceJobIds = Array.from(reportedJobIds).filter(Boolean) as string[];
+  const invoiceByJobId = new Map<string, any>();
+  if (invoiceJobIds.length) {
+    const { data: jobInvoices, error: jobInvoicesError } = await supabaseAdmin
+      .from("invoices")
+      .select("job_id, invoice_number, status, due_date, total_amount, created_at")
+      .in("job_id", invoiceJobIds)
+      .neq("status", "cancelled")
+      .order("created_at", { ascending: true });
+    if (jobInvoicesError) throw jobInvoicesError;
+    (jobInvoices ?? []).forEach((invoice: any) => {
+      if (!invoiceByJobId.has(invoice.job_id)) invoiceByJobId.set(invoice.job_id, invoice);
+    });
+  }
+
   const { data: reservedJobs, error: reservedJobsError } = await supabaseAdmin
     .from("jobs")
     .select("job_id, job_number, job_type, branch, scheduled_date, scheduled_time, parts_confirmed_at, clients(name, address), job_parts!inner(job_part_id, quantity, status, reserved_at, parts(sku, name)), job_technicians(technician_id, is_active, technicians(users(first_name, last_name)))")
@@ -212,8 +230,30 @@ export async function listFieldReports(session: Record<string, unknown>, request
       (assignment: any) => assignment.is_active,
     ).length;
     const submittedAt = report.submitted_at ? new Date(report.submitted_at) : new Date();
-    const status = report.review_status === "approved" ? "Ready for Billing" : report.review_status === "returned" ? "Needs Review" : "Submitted";
-    const tone = report.review_status === "approved" ? "green" : report.review_status === "returned" ? "orange" : "green";
+    // Job-level invoice state: an invoiced job is done with the review queue,
+    // whatever this particular report's review status says.
+    const jobInvoice = job?.job_id ? invoiceByJobId.get(job.job_id) ?? null : null;
+    const invoice = jobInvoice
+      ? { number: jobInvoice.invoice_number, status: invoiceStatusFor(jobInvoice) }
+      : null;
+    const status = invoice
+      ? invoice.status === "paid"
+        ? "Paid"
+        : "Billed"
+      : report.review_status === "approved"
+        ? "Ready for Billing"
+        : report.review_status === "returned"
+          ? "Needs Review"
+          : "Submitted";
+    const tone = invoice
+      ? invoice.status === "paid"
+        ? "green"
+        : "blue"
+      : report.review_status === "approved"
+        ? "green"
+        : report.review_status === "returned"
+          ? "orange"
+          : "green";
     const reportId = String(report.report_number || report.report_id);
 
     return {
@@ -229,6 +269,7 @@ export async function listFieldReports(session: Record<string, unknown>, request
       arrivalTime: String(report.time_arrival ?? "").slice(0, 5),
       status,
       tone,
+      invoice,
       workSummary: report.work_performed || "No work summary provided.",
         parts: (report.report_parts_used ?? []).map((partUse: any) => {
           const part = Array.isArray(partUse.parts) ? partUse.parts[0] : partUse.parts;
@@ -254,7 +295,13 @@ export async function listFieldReports(session: Record<string, unknown>, request
         method: report.client_signoff ? "Signed on device" : "Awaiting client sign-off",
       },
       billing: {
-        readiness: report.review_status === "approved" ? "Ready for billing" : report.review_status === "returned" ? "Needs revision" : "Awaiting review",
+        readiness: invoice
+          ? `Billed as ${invoice.number}`
+          : report.review_status === "approved"
+            ? "Ready for billing"
+            : report.review_status === "returned"
+              ? "Needs revision"
+              : "Awaiting review",
         inventory: report.review_status === "approved" ? "Reconciled" : "Pending",
         reference: report.report_number || "Not assigned",
       },

@@ -17,3 +17,15 @@ export function serviceLabelFor(jobType: unknown) {
   if (jobType === "inspection") return "Inspection";
   return "Service call";
 }
+
+// Invoices store "paid", but "overdue" is derived: nothing runs on a schedule to
+// flip the column, so a stored pending status would go stale. The billing
+// register derives it the same way, which keeps both screens in agreement.
+export function invoiceStatusFor(invoice: any) {
+  if (!invoice) return null;
+  if (String(invoice.status ?? "") === "paid") return "paid";
+  const due = String(invoice.due_date ?? "");
+  const today = new Date().toISOString().slice(0, 10);
+  if (due && due < today) return "overdue";
+  return "pending";
+}

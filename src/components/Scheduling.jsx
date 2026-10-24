@@ -8,13 +8,10 @@ import {
   deleteJob,
   listSchedules,
 } from "../lib/api/scheduling.js";
-import ConfirmPasswordDialog from "./ConfirmPasswordDialog.jsx";
-
 import {
   DAY_LABELS,
   capitalizeFirst,
   formatDateRange,
-  formatLongDate,
   formatMonthLabel,
   formatSelectedDate,
   formatShortDate,
@@ -24,7 +21,8 @@ import {
   isStockAllocated,
   mapScheduleRow,
 } from "../features/scheduling/scheduleUtils.js";
-import DetailRow from "../features/scheduling/DetailRow.jsx";
+import SelectedJobPanel from "../features/scheduling/SelectedJobPanel.jsx";
+import DeleteDraftJobDialog from "../features/scheduling/DeleteDraftJobDialog.jsx";
 
 function Scheduling() {
   const [selectedOrder, setSelectedOrder] = useState("");
@@ -50,6 +48,8 @@ function Scheduling() {
   const draftsOnly = searchParams.get("drafts") === "1";
   // State to manage active view mode ('list' | 'calendar')
   const [viewMode, setViewMode] = useState("list");
+  // Paid jobs are finished work and stay off the board unless asked for.
+  const [showClosed, setShowClosed] = useState(false);
   const [rangeStart, setRangeStart] = useState(getToday);
   const [selectedCalendarDate, setSelectedCalendarDate] = useState(getToday);
   // Day-of-week filter for the weekly list. null shows the whole week.
@@ -94,9 +94,14 @@ function Scheduling() {
   const isCurrentWeek =
     getDateKey(getToday()) >= getDateKey(weekStart) &&
     getDateKey(getToday()) <= getDateKey(weekEnd);
+  // A job whose invoice is settled is finished work. It is hidden from the board
+  // by default instead of reading "Scheduled" forever; the toggle brings it back.
+  const visibleSchedule = showClosed
+    ? schedule
+    : schedule.filter((job) => job[14]?.status !== "paid");
   const scheduledJobsInRange = draftsOnly
-    ? schedule.filter((job) => !job[13] && job[12] === "pending")
-    : schedule.filter((job) => {
+    ? visibleSchedule.filter((job) => !job[13] && job[12] === "pending")
+    : visibleSchedule.filter((job) => {
         const jobDate = scheduledJobDates[job[3]];
         return jobDate >= weekStart && jobDate <= weekEnd;
       });
@@ -136,12 +141,12 @@ function Scheduling() {
             index - calendarLeadingDays + 1,
           ),
   );
-  const selectedDayJobs = schedule.filter(
+  const selectedDayJobs = visibleSchedule.filter(
     (job) =>
       getDateKey(scheduledJobDates[job[3]]) ===
       getDateKey(selectedCalendarDate),
   );
-  const scheduledJobsInCalendarMonth = schedule.filter((job) => {
+  const scheduledJobsInCalendarMonth = visibleSchedule.filter((job) => {
     const jobDate = scheduledJobDates[job[3]];
     return (
       jobDate.getFullYear() === calendarMonthStart.getFullYear() &&
@@ -174,7 +179,7 @@ function Scheduling() {
 
   function handleCalendarDateClick(date) {
     setSelectedCalendarDate(date);
-    const firstJobOnDate = schedule.find(
+    const firstJobOnDate = visibleSchedule.find(
       (job) => getDateKey(scheduledJobDates[job[3]]) === getDateKey(date),
     );
     if (firstJobOnDate) {
@@ -197,7 +202,7 @@ function Scheduling() {
 
   const defaultVisibleJob =
     viewMode === "calendar" ? selectedDayJobs[0] : listJobs[0];
-  const selectedJob = schedule.find((job) => job[3] === selectedOrder) ??
+  const selectedJob = visibleSchedule.find((job) => job[3] === selectedOrder) ??
     defaultVisibleJob ?? [
       "--:--",
       "",
@@ -213,6 +218,7 @@ function Scheduling() {
       "",
       "",
       "",
+      null,
     ];
   const [
     jobTime,
@@ -229,6 +235,7 @@ function Scheduling() {
     jobDate,
     jobPartsStatus,
     jobAssignmentConfirmedAt,
+    jobInvoice,
   ] = selectedJob;
   // The DB timestamp is authoritative and shared; the local set only covers the
   // moment between confirming and the next schedule refresh.
@@ -241,7 +248,11 @@ function Scheduling() {
     status: jobStatus,
     partsStatus: jobPartsStatus,
     assignmentConfirmed: isAssignmentConfirmed,
+    invoiceStatus: jobInvoice?.status ?? null,
   });
+  const selectedJobScheduledLabel = scheduledJobDates[jobOrder]
+    ? formatSelectedDate(scheduledJobDates[jobOrder]).split(",")[0].toUpperCase()
+    : "SCHEDULED";
 
   async function handleConfirmAssignment() {
     const order = selectedJob[3];
@@ -383,7 +394,7 @@ function Scheduling() {
                       {weekDays.map((date) => {
                         const dateKey = getDateKey(date);
                         const isActive = dayFilter === dateKey;
-                        const jobsOnDay = schedule.filter(
+                        const jobsOnDay = visibleSchedule.filter(
                           (job) =>
                             getDateKey(scheduledJobDates[job[3]]) === dateKey,
                         ).length;
@@ -417,29 +428,44 @@ function Scheduling() {
                     </div>
                   )}
                 </div>
-                <div className="flex rounded-[7px] bg-[#f4f7fb] p-1 text-[11px] font-bold max-[1024px]:text-[9px]">
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setViewMode("list")}
-                    className={`rounded-[6px] px-4 py-2 transition-all max-[1024px]:px-3 max-[1024px]:py-1.5 ${
-                      viewMode === "list"
-                        ? "bg-white text-[#174f9a] shadow-sm"
-                        : "text-[#82909c] hover:text-[#174f9a]"
+                    aria-pressed={showClosed}
+                    title="Include jobs whose invoice is already paid"
+                    onClick={() => setShowClosed((isShowing) => !isShowing)}
+                    className={`rounded-[6px] border px-3 py-2 text-[10px] font-bold transition-colors max-[1024px]:px-2 max-[1024px]:py-1.5 max-[1024px]:text-[9px] ${
+                      showClosed
+                        ? "border-[#1250a0] bg-[#1250a0] text-white"
+                        : "border-[#e5e9ed] bg-white text-[#82909c] hover:border-[#1250a0] hover:text-[#1250a0]"
                     }`}
                   >
-                    List
+                    Paid jobs
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setViewMode("calendar")}
-                    className={`rounded-[6px] px-4 py-2 transition-all max-[1024px]:px-3 max-[1024px]:py-1.5 ${
-                      viewMode === "calendar"
-                        ? "bg-white text-[#174f9a] shadow-sm"
-                        : "text-[#82909c] hover:text-[#174f9a]"
-                    }`}
-                  >
-                    Calendar
-                  </button>
+                  <div className="flex rounded-[7px] bg-[#f4f7fb] p-1 text-[11px] font-bold max-[1024px]:text-[9px]">
+                    <button
+                      type="button"
+                      onClick={() => setViewMode("list")}
+                      className={`rounded-[6px] px-4 py-2 transition-all max-[1024px]:px-3 max-[1024px]:py-1.5 ${
+                        viewMode === "list"
+                          ? "bg-white text-[#174f9a] shadow-sm"
+                          : "text-[#82909c] hover:text-[#174f9a]"
+                      }`}
+                    >
+                      List
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewMode("calendar")}
+                      className={`rounded-[6px] px-4 py-2 transition-all max-[1024px]:px-3 max-[1024px]:py-1.5 ${
+                        viewMode === "calendar"
+                          ? "bg-white text-[#174f9a] shadow-sm"
+                          : "text-[#82909c] hover:text-[#174f9a]"
+                      }`}
+                    >
+                      Calendar
+                    </button>
+                  </div>
                 </div>
               </header>
 
@@ -470,6 +496,7 @@ function Scheduling() {
                         date,
                         jobPartsStatus,
                         jobConfirmedAt,
+                        jobInvoice,
                       ]) => {
                         const isSelected = selectedOrder === order;
                         const stage = getJobStage({
@@ -478,6 +505,7 @@ function Scheduling() {
                           assignmentConfirmed:
                             Boolean(jobConfirmedAt) ||
                             confirmedAssignments.has(order),
+                          invoiceStatus: jobInvoice?.status ?? null,
                         });
                         return (
                           <button
@@ -672,144 +700,38 @@ function Scheduling() {
               </div>
             </section>
 
-            <aside className="min-h-[518px] rounded-[12px] border border-[#dfe6ec] bg-[#f9fbfd] p-5 shadow-[0_3px_8px_rgb(31_59_82_/_10%)] max-[1024px]:min-h-[455px] max-[1024px]:p-4 max-[620px]:min-h-0 max-[620px]:rounded-[7px] max-[620px]:p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="m-0 text-[10px] uppercase tracking-[.08em] text-[#87929c]">
-                    Selected work order
-                  </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <small className="text-[10px] font-bold text-[#50719a]">
-                      {jobOrder || "—"}
-                    </small>
-                    {jobOrder && (
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-[.04em] ${selectedJobStage.style}`}
-                      >
-                        {selectedJobStage.label}
-                      </span>
-                    )}
-                  </div>
-                  <h2 className="m-0 mt-2 text-[23px] font-bold leading-tight max-[1024px]:text-[17px]">
-                    {jobClient}
-                  </h2>
-                  <p className="m-0 mt-2 flex items-start text-[10px] text-[#8a949c]">
-                    <span className="material-symbols-outlined mr-1 flex-none align-middle text-[15px]">
-                      location_on
-                    </span>
-                    <span className="min-w-0">{jobLocation}</span>
-                  </p>
-                </div>
-                <div className="flex flex-none items-center gap-2">
-                  {jobOrder && isDraftUnallocated && (
-                    <button
-                      type="button"
-                      onClick={() =>
-                        navigate(`/scheduling/${encodeURIComponent(jobOrder)}/edit`)
-                      }
-                      className="grid h-8 w-8 place-items-center rounded-[6px] bg-white text-[#174f9a] shadow-sm hover:bg-[#eaf2fc]"
-                      aria-label="Edit selected work order"
-                      title="Edit selected work order"
-                    >
-                      <span className="material-symbols-outlined text-[17px]">
-                        edit
-                      </span>
-                    </button>
-                  )}
-                  <span className="rounded-[6px] bg-white px-3 py-2 text-[9px] text-[#6d879f] shadow-sm">
-                    {scheduledJobDates[jobOrder]
-                      ? formatSelectedDate(scheduledJobDates[jobOrder])
-                          .split(",")[0]
-                          .toUpperCase()
-                      : "SCHEDULED"}
-                  </span>
-                </div>
-              </div>
-
-              <dl className="mt-5 overflow-hidden rounded-[8px] border border-[#e4eaf0] bg-white shadow-sm max-[1024px]:mt-4">
-                <DetailRow icon="tag" label="Job number">
-                  {jobOrder || "—"}
-                </DetailRow>
-                <DetailRow icon="apartment" label="Branch">
-                  {jobBranch ? capitalizeFirst(jobBranch) : "—"}
-                </DetailRow>
-                <DetailRow icon="build" label="Service type">
-                  {jobService || "—"}
-                </DetailRow>
-                <DetailRow icon="event" label="Schedule">
-                  {jobDate ? formatLongDate(jobDate) : "—"}
-                </DetailRow>
-                <DetailRow icon="schedule" label="Start time">
-                  {jobTime || "—"}
-                </DetailRow>
-                <DetailRow icon="location_on" label="Site">
-                  <span className="block">{jobLocation || "—"}</span>
-                </DetailRow>
-                <DetailRow icon="person" label="Technicians">
-                  {jobTechnicians?.length ? (
-                    <span className="block">
-                      {jobTechnicians.map((technician) => (
-                        <span className="block" key={technician.id}>
-                          {technician.name}
-                        </span>
-                      ))}
-                    </span>
-                  ) : (
-                    "Unassigned"
-                  )}
-                </DetailRow>
-                <DetailRow icon="inventory_2" label="Parts / stock">
-                  {jobStock || "—"}
-                </DetailRow>
-              </dl>
-
-              <button
-                type="button"
-                disabled={
-                  !jobOrder || isConfirmingAssignment || isStockAllocated(jobPartsStatus)
-                }
-                onClick={handleConfirmAssignment}
-                className={`mt-3 flex w-full items-center justify-center gap-2 rounded-[6px] py-3 text-[12px] font-bold text-white max-[1024px]:py-2 max-[1024px]:text-[9px] ${
-                  isStockAllocated(jobPartsStatus)
-                    ? "cursor-default bg-[#267340]"
-                    : "bg-[#1250a0] hover:bg-[#0e4388] disabled:cursor-not-allowed disabled:bg-[#86a7d5]"
-                }`}
-              >
-                <span className="material-symbols-outlined text-[18px]">
-                  {isStockAllocated(jobPartsStatus) ? "event_available" : "check"}
-                </span>
-                {isStockAllocated(jobPartsStatus)
-                  ? "Job scheduled"
-                  : isConfirmingAssignment
-                    ? "Confirming..."
-                    : isAssignmentConfirmed
-                      ? "Continue to inventory request"
-                      : "Confirm assignment"}
-              </button>
-              {isDraftUnallocated && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDeleteDraftError("");
-                    setDeleteTarget(jobOrder);
-                  }}
-                  className="mt-2 flex w-full items-center justify-center gap-2 rounded-[6px] border border-[#e2b4ad] bg-white py-2.5 text-[11px] font-bold text-[#b33a3a] hover:bg-[#fff3f1] max-[1024px]:py-2 max-[1024px]:text-[8px]"
-                >
-                  <span className="material-symbols-outlined text-[16px]">
-                    delete
-                  </span>
-                  Delete draft
-                </button>
-              )}
-              {confirmError.message && confirmError.order === jobOrder && (
-                <p
-                  className="m-0 mt-2 rounded-[6px] border border-[#f0b8b0] bg-[#fff1ee] px-3 py-2 text-[11px] text-[#b64132]"
-                  role="alert"
-                >
-                  {confirmError.message}
-                </p>
-              )}
-            </aside>
+            <SelectedJobPanel
+              job={{
+                order: jobOrder,
+                client: jobClient,
+                location: jobLocation,
+                branch: jobBranch,
+                service: jobService,
+                date: jobDate,
+                time: jobTime,
+                technicians: jobTechnicians,
+                stock: jobStock,
+              }}
+              stage={selectedJobStage}
+              scheduledLabel={selectedJobScheduledLabel}
+              invoice={jobInvoice}
+              isDraft={isDraftUnallocated}
+              isConfirmed={isAssignmentConfirmed}
+              stockAllocated={isStockAllocated(jobPartsStatus)}
+              isConfirming={isConfirmingAssignment}
+              confirmError={
+                confirmError.order === jobOrder ? confirmError.message : ""
+              }
+              onEdit={() =>
+                navigate(`/scheduling/${encodeURIComponent(jobOrder)}/edit`)
+              }
+              onConfirm={handleConfirmAssignment}
+              onViewInvoice={() => navigate("/billing")}
+              onRequestDelete={() => {
+                setDeleteDraftError("");
+                setDeleteTarget(jobOrder);
+              }}
+            />
           </div>
 
           <footer className="mt-8 border-t border-[#c9d4de] pt-3 text-[9px] text-[#8a9299] max-[1024px]:hidden">
@@ -818,19 +740,13 @@ function Scheduling() {
         </div>
       </section>
 
-      {deleteTarget && (
-        <ConfirmPasswordDialog
-          title="Delete draft job"
-          message={`Delete ${deleteTarget}? Its draft quotation and technician assignments will be removed too.`}
-          detail="Only a draft can be deleted. Once a job is confirmed it must be cancelled instead, so its history stays intact."
-          confirmLabel="Delete draft"
-          busyLabel="Deleting..."
-          isBusy={isDeletingDraft}
-          error={deleteDraftError}
-          onCancel={() => setDeleteTarget("")}
-          onConfirm={handleDeleteDraft}
-        />
-      )}
+      <DeleteDraftJobDialog
+        jobNumber={deleteTarget}
+        isBusy={isDeletingDraft}
+        error={deleteDraftError}
+        onCancel={() => setDeleteTarget("")}
+        onConfirm={handleDeleteDraft}
+      />
     </main>
   );
 }

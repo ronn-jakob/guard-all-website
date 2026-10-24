@@ -44,7 +44,7 @@ export const DAY_LABELS = ["S", "M", "T", "W", "TH", "F", "ST"];
 // Index order is load-bearing and must stay in sync with mapScheduleRow:
 // 0 time, 1 day, 2 client, 3 order, 4 service, 5 location, 6 technician,
 // 7 stock, 8 technicians, 9 status, 10 branch, 11 date,
-// 12 partsStatus, 13 assignmentConfirmedAt.
+// 12 partsStatus, 13 assignmentConfirmedAt, 14 invoice.
 export function mapScheduleRow(job) {
   return [
     job.time,
@@ -61,6 +61,7 @@ export function mapScheduleRow(job) {
     job.date,
     job.partsStatus,
     job.assignmentConfirmedAt,
+    job.invoice ?? null,
   ];
 }
 
@@ -78,10 +79,25 @@ export function isStockAllocated(partsStatus) {
 }
 
 // Workflow stage shown on the badge:
+//   Paid                 -> the job's invoice is settled, so the board is done with it
+//   Billed               -> an invoice is issued and still being collected
 //   Waiting confirmation -> assignment not confirmed yet
 //   Pending              -> confirmed, queued for stock allocation
 //   Scheduled            -> stock allocated (parts_status = confirmed)
-export function getJobStage({ status, partsStatus, assignmentConfirmed }) {
+// The jobs table's own status is never advanced after insert, so invoicing is the
+// only signal that a job is finished.
+export function getJobStage({
+  status,
+  partsStatus,
+  assignmentConfirmed,
+  invoiceStatus,
+}) {
+  if (invoiceStatus === "paid") {
+    return { label: "Paid", style: STAGE_STYLES.done };
+  }
+  if (invoiceStatus) {
+    return { label: "Billed", style: STAGE_STYLES.active };
+  }
   if (status === "completed") {
     return { label: "Completed", style: STAGE_STYLES.done };
   }
@@ -107,6 +123,14 @@ export function formatShortDate(dateValue) {
 
 export function capitalizeFirst(value) {
   return String(value ?? "").replace(/^./, (letter) => letter.toUpperCase());
+}
+
+// Invoice statuses arrive already derived by the backend: pending | overdue | paid.
+export function invoiceStatusLabel(status) {
+  if (status === "paid") return "Paid";
+  if (status === "overdue") return "Overdue";
+  if (status === "pending") return "Pending";
+  return "—";
 }
 
 export function formatLongDate(dateValue) {
