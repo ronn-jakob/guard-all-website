@@ -641,7 +641,7 @@ function Inventory() {
         <TopBar />
         <div className="px-8 pb-6 pt-8 max-[1024px]:px-6 max-[1024px]:pb-20 max-[1024px]:pt-5 max-[620px]:px-3">
           {/* Header Bar */}
-          <div className="mb-7 flex items-end justify-between gap-5 max-[620px]:mb-4 max-[620px]:items-start">
+          <div className="mb-7 flex items-end justify-between gap-5 max-[620px]:mb-4 max-[620px]:flex-col max-[620px]:items-stretch max-[620px]:gap-3">
             <div>
               <p className="mb-1 text-[10px] font-bold uppercase tracking-[.12em] text-[#818b94] max-[620px]:text-[7px]">
                 Operations / Stock ledger
@@ -655,32 +655,32 @@ function Inventory() {
                   : "Know what can leave the branch before the truck does."}
               </p>
             </div>
-            <div className="flex items-center gap-3 max-[620px]:gap-2">
+            <div className="flex items-center gap-3 max-[620px]:w-full max-[620px]:gap-2">
               {!isAllocatingForJob && !isAllocationRoute && !isJobAllocation && <button
                 type="button"
                 onClick={openAddItem}
-                className="rounded-[6px] border border-[#1250a0] bg-white px-5 py-3 text-[12px] font-bold text-[#1250a0] shadow-[0_2px_4px_rgb(18_80_160_/_12%)] hover:bg-[#f3f8ff] max-[1024px]:px-4 max-[1024px]:py-2 max-[620px]:text-[9px]"
+                className="rounded-[6px] border border-[#1250a0] bg-white px-5 py-3 text-[12px] font-bold text-[#1250a0] shadow-[0_2px_4px_rgb(18_80_160_/_12%)] hover:bg-[#f3f8ff] max-[1024px]:px-4 max-[1024px]:py-2 max-[620px]:flex-1 max-[620px]:px-2 max-[620px]:text-[11px]"
               >
                 + Add New Item
               </button>}
               {!isAllocatingForJob && !isAllocationRoute && !isJobAllocation && <button
                 type="button"
                 onClick={() => setIsManageCategoriesOpen(true)}
-                className="rounded-[6px] border border-[#d9dfe4] bg-white px-4 py-3 text-[12px] font-bold text-[#5e6b78] hover:bg-[#f4f6f8] max-[1024px]:px-3 max-[1024px]:py-2 max-[620px]:hidden"
+                className="rounded-[6px] border border-[#d9dfe4] bg-white px-4 py-3 text-[12px] font-bold text-[#5e6b78] hover:bg-[#f4f6f8] max-[1024px]:px-3 max-[1024px]:py-2 max-[620px]:flex-1 max-[620px]:px-2 max-[620px]:text-[11px]"
               >
                 Categories
               </button>}
             </div>
           </div>
 
-          <section className="grid grid-cols-3 gap-[18px] transition-[max-height,opacity] duration-300 ease-in-out max-[620px]:gap-1">
+          <section className="grid grid-cols-3 gap-[18px] transition-[max-height,opacity] duration-300 ease-in-out max-[620px]:grid-cols-1 max-[620px]:gap-2">
               {metricCards.map(([icon, title, value, note, alert]) => (
                 <article
-                  className={`relative min-h-[156px] rounded-[11px] border bg-white p-7 shadow-[0_3px_8px_rgb(31_59_82_/_14%)] max-[1024px]:min-h-[112px] max-[1024px]:p-4 max-[620px]:min-h-[58px] max-[620px]:rounded-[6px] max-[620px]:p-2 ${alert ? "border-[#ff725f]" : "border-[#dfe6ec]"}`}
+                  className={`relative min-h-[156px] rounded-[11px] border bg-white p-7 shadow-[0_3px_8px_rgb(31_59_82_/_14%)] max-[1024px]:min-h-[112px] max-[1024px]:p-4 max-[620px]:flex max-[620px]:min-h-[64px] max-[620px]:items-center max-[620px]:gap-3 max-[620px]:rounded-[6px] max-[620px]:p-3 ${alert ? "border-[#ff725f]" : "border-[#dfe6ec]"}`}
                   key={title}
                 >
                   <div
-                    className={`grid h-9 w-9 place-items-center rounded-[6px] max-[1024px]:h-7 max-[1024px]:w-7 max-[620px]:hidden ${alert ? "bg-[#ffd5cc] text-[#ff725f]" : "bg-[#d6e6fb] text-[#1954a0]"}`}
+                    className={`grid h-9 w-9 place-items-center rounded-[6px] max-[1024px]:h-7 max-[1024px]:w-7 max-[620px]:h-8 max-[620px]:w-8 max-[620px]:shrink-0 ${alert ? "bg-[#ffd5cc] text-[#ff725f]" : "bg-[#d6e6fb] text-[#1954a0]"}`}
                   >
                     <span className="material-symbols-outlined text-[21px]">
                       {icon}
@@ -691,15 +691,17 @@ function Inventory() {
                   >
                     north_east
                   </span>
-                  <p className="mb-0 mt-5 text-[11px] font-bold uppercase tracking-[.07em] text-[#858b90] max-[1024px]:mt-3 max-[620px]:mt-0 max-[620px]:text-[6px] max-[620px]:tracking-normal">
-                    {title}
-                  </p>
-                  <strong className="mt-1 block text-[29px] font-extrabold leading-tight max-[1024px]:text-[23px] max-[620px]:text-[15px]">
-                    {value}
-                  </strong>
-                  <small className="text-[12px] text-[#8e959b] max-[1024px]:text-[9px] max-[620px]:hidden">
-                    {note}
-                  </small>
+                  <div className="min-w-0 flex-1 max-[620px]:grid max-[620px]:grid-cols-[minmax(0,1fr)_auto] max-[620px]:items-center max-[620px]:gap-x-3">
+                    <p className="mb-0 mt-5 text-[11px] font-bold uppercase tracking-[.07em] text-[#858b90] max-[1024px]:mt-3 max-[620px]:col-start-1 max-[620px]:row-start-1 max-[620px]:mt-0 max-[620px]:text-[10px] max-[620px]:tracking-normal">
+                      {title}
+                    </p>
+                    <strong className="mt-1 block text-[29px] font-extrabold leading-tight max-[1024px]:text-[23px] max-[620px]:col-start-2 max-[620px]:row-span-2 max-[620px]:row-start-1 max-[620px]:mt-0 max-[620px]:text-[20px]">
+                      {value}
+                    </strong>
+                    <small className="text-[12px] text-[#8e959b] max-[1024px]:text-[9px] max-[620px]:col-start-1 max-[620px]:row-start-2 max-[620px]:block max-[620px]:text-[10px]">
+                      {note}
+                    </small>
+                  </div>
                 </article>
               ))}
           </section>
@@ -707,7 +709,7 @@ function Inventory() {
           {/* Tabbed Content Container */}
           <div className="mt-5 overflow-hidden rounded-[11px] border border-[#dfe6ec] bg-white shadow-[0_3px_8px_rgb(31_59_82_/_14%)]">
             {/* Tabs Navigation */}
-            <div className="flex border-b border-[#e1e6eb] bg-white px-7 pt-4">
+            <div className="flex overflow-x-auto border-b border-[#e1e6eb] bg-white px-7 pt-4 max-[620px]:gap-5 max-[620px]:px-3 max-[620px]:pt-2">
               {[
                 { id: "Stock Ledger", label: "Stock Ledger" },
                 { id: "Pending Job Requests", label: "Pending Job Requests" },
@@ -720,7 +722,7 @@ function Inventory() {
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`mr-8 pb-3 text-[13px] font-bold transition-all ${
+                  className={`mr-8 shrink-0 whitespace-nowrap pb-3 text-[13px] font-bold transition-all max-[620px]:mr-0 max-[620px]:text-[11px] ${
                     activeTab === tab.id
                       ? "border-b-2 border-[#1250a0] text-[#1250a0]"
                       : "text-[#8b949c] hover:text-[#063b7c]"

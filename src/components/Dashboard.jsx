@@ -26,7 +26,7 @@ const stockStatus = (partsStatus) => {
 };
 
 const row =
-  "grid grid-cols-[1.05fr_1.42fr_1.18fr_1fr_36px] items-center px-5 max-[620px]:grid-cols-[1fr_1.5fr_1.2fr_24px] max-[620px]:px-[9px]";
+  "grid grid-cols-[1.05fr_1.42fr_1.18fr_1fr_36px] items-center px-5 max-[620px]:grid-cols-[minmax(0,1fr)_auto] max-[620px]:gap-x-3 max-[620px]:gap-y-1 max-[620px]:px-3";
 const label =
   "m-0 text-[10px] font-bold uppercase tracking-[.12em] text-[#777e85]";
 
@@ -152,25 +152,25 @@ function Dashboard() {
             </p>
           )}
 
-          <section className="grid grid-cols-4 gap-[18px] max-[1024px]:grid-cols-2 max-[620px]:grid-cols-1 max-[620px]:gap-1">
+          <section className="grid grid-cols-4 gap-[18px] max-[1024px]:grid-cols-2 max-[620px]:grid-cols-2 max-[620px]:gap-2">
             {metrics.map(([icon, title, value, note, tone, alert, href]) => {
-              const cardClass = `relative min-h-[156px] rounded-[10px] border bg-white p-[22px] shadow-[0_3px_7px_rgb(31_59_82_/_13%)] max-[1024px]:min-h-[105px] max-[1024px]:p-4 max-[620px]:min-h-[64px] max-[620px]:rounded-[6px] max-[620px]:p-3 ${alert ? "border-[#ff725f] shadow-[0_3px_8px_rgb(255_114_95_/_22%)]" : "border-[#e0e6eb]"}`;
+              const cardClass = `relative min-h-[156px] rounded-[10px] border bg-white p-[22px] shadow-[0_3px_7px_rgb(31_59_82_/_13%)] max-[1024px]:min-h-[105px] max-[1024px]:p-4 max-[620px]:min-h-[84px] max-[620px]:rounded-[6px] max-[620px]:p-2.5 ${alert ? "border-[#ff725f] shadow-[0_3px_8px_rgb(255_114_95_/_22%)]" : "border-[#e0e6eb]"}`;
               const body = (
                 <>
                   <div
-                    className={`grid h-9 w-9 place-items-center rounded-[6px] text-[15px] max-[620px]:hidden ${tone}`}
+                    className={`grid h-9 w-9 place-items-center rounded-[6px] text-[15px] max-[620px]:h-6 max-[620px]:w-6 max-[620px]:rounded-[5px] ${tone}`}
                   >
                     <span className="material-symbols-outlined text-[21px]">
                       {icon}
                     </span>
                   </div>
-                  <p className="mb-0 mt-5 text-[11px] font-bold uppercase tracking-[.06em] text-[#858b90] max-[1024px]:mt-3 max-[620px]:mt-0 max-[620px]:text-[7px]">
+                  <p className="mb-0 mt-5 text-[11px] font-bold uppercase tracking-[.06em] text-[#858b90] max-[1024px]:mt-3 max-[620px]:mt-2 max-[620px]:text-[8px]">
                     {title}
                   </p>
-                  <strong className="mt-px block text-[29px] font-extrabold leading-tight max-[1024px]:text-[23px] max-[620px]:text-[15px]">
+                  <strong className="mt-px block text-[29px] font-extrabold leading-tight max-[1024px]:text-[23px] max-[620px]:text-[17px]">
                     {isLoading ? "—" : value}
                   </strong>
-                  <small className="text-[10px] text-[#8e959b] max-[620px]:hidden">
+                  <small className="text-[10px] text-[#8e959b] max-[620px]:text-[9px]">
                     {note}
                   </small>
                 </>
@@ -194,16 +194,16 @@ function Dashboard() {
           </section>
 
           <div className="mt-4 grid grid-cols-[minmax(0,2.25fr)_minmax(260px,1fr)] gap-[18px] max-[1024px]:grid-cols-[minmax(0,1.4fr)_minmax(180px,1fr)] max-[1024px]:gap-3 max-[620px]:grid-cols-1">
-            <section className="overflow-hidden rounded-[11px] border border-[#dfe6ec] bg-white shadow-[0_3px_7px_rgb(31_59_82_/_10%)] max-[620px]:overflow-visible max-[620px]:border-0 max-[620px]:bg-transparent max-[620px]:shadow-none">
-              <header className="flex items-center justify-between px-[22px] pb-[14px] pt-5 max-[1024px]:px-3 max-[1024px]:pb-3 max-[1024px]:pt-3 max-[620px]:rounded-[6px] max-[620px]:bg-white">
+            <section className="overflow-hidden rounded-[11px] border border-[#dfe6ec] bg-white shadow-[0_3px_7px_rgb(31_59_82_/_10%)]">
+              <header className="flex items-center justify-between px-[22px] pb-[14px] pt-5 max-[1024px]:px-3 max-[1024px]:pb-3 max-[1024px]:pt-3">
                 <div>
                   <p className={label}>Live board · {jobs.length} scheduled</p>
-                  <h2 className="m-0 mt-1 text-[21px] font-bold max-[1024px]:text-[13px]">
+                  <h2 className="m-0 mt-1 text-[21px] font-bold max-[1024px]:text-[16px]">
                     Upcoming jobs
                   </h2>
                 </div>
                 <Link
-                  className="text-[11px] font-bold text-[#063b7c] no-underline max-[1024px]:text-[7px]"
+                  className="text-[11px] font-bold text-[#063b7c] no-underline max-[1024px]:text-[11px]"
                   to="/scheduling"
                 >
                   Open schedule{" "}
@@ -220,7 +220,7 @@ function Dashboard() {
                   <span>Time / Work order</span>
                   <span>Client &amp; site</span>
                   <span>Assigned technician</span>
-                  <span>Stock check</span>
+                  <span className="text-center">Stock check</span>
                   <span aria-hidden="true" />
                 </div>
                 {isLoading ? (
@@ -236,11 +236,11 @@ function Dashboard() {
                     const stock = stockStatus(job.partsStatus);
                     return (
                       <div
-                        className={`${row} min-h-[62px] border-b border-[#e0e0e0] text-[10px] last:border-0 max-[1024px]:min-h-[56px] max-[1024px]:px-3 max-[1024px]:text-[8px] max-[620px]:mb-1 max-[620px]:min-h-[67px] max-[620px]:rounded-[6px] max-[620px]:border max-[620px]:px-3 max-[620px]:py-2 max-[620px]:[&>*:nth-child(4)]:hidden ${index === 3 ? "max-[620px]:hidden" : ""}`}
+                        className={`${row} min-h-[62px] border-b border-[#e0e0e0] text-[10px] last:border-0 max-[1024px]:min-h-[56px] max-[1024px]:px-3 max-[1024px]:text-[9px] max-[620px]:mb-2 max-[620px]:min-h-0 max-[620px]:rounded-[6px] max-[620px]:border max-[620px]:px-3 max-[620px]:py-2`}
                         role="row"
                         key={`${job.jobNumber}-${index}`}
                       >
-                        <div>
+                        <div className="min-w-0 max-[620px]:col-start-1 max-[620px]:row-start-1">
                           <strong className="text-[11px]">{job.time}</strong>
                           <em className="ml-[5px] rounded-[2px] bg-[#dbeafa] px-1 py-[3px] text-[8px] not-italic font-bold text-[#184f96]">
                             {job.jobNumber}
@@ -249,19 +249,19 @@ function Dashboard() {
                             {job.serviceLabel} · {formatShortDate(job.scheduledDate)}
                           </small>
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-0 max-[620px]:col-span-2 max-[620px]:row-start-2">
                           <strong className="block truncate">
                             {job.clientName}
                           </strong>
-                          <small className="mt-1 block text-[9px] text-[#8d969e]">
+                          <small className="mt-1 block text-[9px] text-[#8d969e] max-[620px]:text-[10px]">
                             <span className="material-symbols-outlined align-middle text-[10px]">
                               location_on
                             </span>{" "}
                             {job.siteAddress}
                           </small>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#17549e] text-[9px] font-bold text-white">
+                        <div className="flex min-w-0 items-center gap-2 max-[620px]:col-span-2 max-[620px]:row-start-3">
+                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#17549e] text-[9px] font-bold text-white max-[620px]:h-8 max-[620px]:w-8">
                             {job.technicianInitials}
                           </span>
                           <span className="min-w-0 truncate">
@@ -277,11 +277,11 @@ function Dashboard() {
                           )}
                         </div>
                         <span
-                          className={`w-max rounded-[9px] px-3 py-1.5 text-[8px] ${stock === "Available" || stock === "Not needed" ? "border border-[#8bdba2] bg-[#dff8e5] text-[#18823a]" : "border border-[#ff9f8f] bg-[#ffe0da] text-[#d75342]"}`}
+                          className={`w-max justify-self-center self-center rounded-[9px] px-2 py-1.5 text-center text-[8px] max-[620px]:col-start-2 max-[620px]:row-start-1 max-[620px]:text-[10px] ${stock === "Available" || stock === "Not needed" ? "border border-[#8bdba2] bg-[#dff8e5] text-[#18823a]" : "border border-[#ff9f8f] bg-[#ffe0da] text-[#d75342]"}`}
                         >
                           ◎ {stock}
                         </span>
-                        <span className="material-symbols-outlined text-[20px] text-[#15519c]">
+                        <span className="material-symbols-outlined text-[20px] text-[#15519c] max-[620px]:hidden">
                           chevron_right
                         </span>
                       </div>
@@ -291,17 +291,17 @@ function Dashboard() {
               </div>
             </section>
 
-            <aside className="min-h-[290px] overflow-hidden rounded-[11px] border border-[#dfe6ec] bg-[#f8fbff] p-5 shadow-[0_3px_7px_rgb(31_59_82_/_10%)] max-[1024px]:min-h-[360px] max-[1024px]:bg-[#063b7c] max-[1024px]:p-3 max-[620px]:min-h-0 max-[620px]:rounded-[7px]">
+            <aside className="min-h-[290px] overflow-hidden rounded-[11px] border border-[#dfe6ec] bg-[#f8fbff] p-5 shadow-[0_3px_7px_rgb(31_59_82_/_10%)] max-[1024px]:min-h-[360px] max-[1024px]:bg-[#063b7c] max-[1024px]:p-3 max-[620px]:min-h-0 max-[620px]:rounded-[7px] max-[620px]:border-[#dfe6ec] max-[620px]:bg-white">
               <header className="flex justify-between">
                 <div>
-                  <p className={`${label} max-[1024px]:text-[#dbeafa]`}>
+                  <p className={`${label} max-[1024px]:text-[#dbeafa] max-[620px]:text-[#777e85]`}>
                     Needs attention
                   </p>
-                  <h2 className="m-0 mt-1 text-[21px] font-bold max-[1024px]:text-[13px] max-[1024px]:text-white">
+                  <h2 className="m-0 mt-1 text-[21px] font-bold max-[1024px]:text-[16px] max-[1024px]:text-white max-[620px]:text-[#174f9a]">
                     Operation pulse
                   </h2>
                 </div>
-                <span className="grid h-[26px] w-[26px] place-items-center rounded-[6px] bg-white text-lg max-[1024px]:hidden">
+                <span className="grid h-[26px] w-[26px] place-items-center rounded-[6px] bg-white text-lg max-[1024px]:grid max-[620px]:bg-[#e8f1fd] max-[620px]:text-[#1250a0]">
                   <span className="material-symbols-outlined text-[18px]">
                     shield
                   </span>
@@ -310,7 +310,7 @@ function Dashboard() {
               <div className="mt-[22px] max-[1024px]:mt-3">
                 {pulseItems.map(({ icon, color, title, note }) => (
                   <div
-                    className="mb-3 flex min-h-[50px] items-center gap-2 rounded-[5px] border border-[#dbe0e5] bg-white p-2.5 text-[#063b7c] max-[1024px]:mb-2 max-[1024px]:min-h-[47px] max-[1024px]:p-2"
+                    className="mb-3 flex min-h-[50px] items-center gap-2 rounded-[5px] border border-[#dbe0e5] bg-white p-2.5 text-[#063b7c] max-[1024px]:mb-2 max-[1024px]:min-h-[47px] max-[1024px]:p-2 max-[620px]:min-h-[52px] max-[620px]:px-2.5"
                     key={title}
                   >
                     <span className={`w-5 text-center text-[13px] ${color}`}>
@@ -318,9 +318,9 @@ function Dashboard() {
                         {icon}
                       </span>
                     </span>
-                    <strong className="flex-1 text-[10px] max-[1024px]:text-[8px]">
+                    <strong className="flex-1 text-[10px] max-[1024px]:text-[11px]">
                       {title}
-                      <small className="mt-1 block text-[9px] font-normal text-[#8a929a] max-[1024px]:text-[7px]">
+                      <small className="mt-1 block text-[9px] font-normal text-[#8a929a] max-[1024px]:text-[9px]">
                         {note}
                       </small>
                     </strong>
@@ -330,7 +330,7 @@ function Dashboard() {
               <div className="mt-5 border-t border-[#d2d9e0]" />
             </aside>
           </div>
-          <footer className="mt-6 border-t border-[#c9d4de] pt-3 text-[9px] text-[#8a9299] max-[1024px]:hidden">
+          <footer className="mt-6 border-t border-[#c9d4de] pt-3 text-[9px] text-[#8a9299] max-[1024px]:mt-3 max-[1024px]:block max-[1024px]:text-[10px]">
             Guard-All Electronic Security Systems, Inc.
           </footer>
         </div>

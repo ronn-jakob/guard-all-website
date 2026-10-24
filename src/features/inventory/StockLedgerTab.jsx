@@ -46,21 +46,21 @@ export default function StockLedgerTab({
 }) {
   return (
     <>
-      <header className="flex items-center justify-between gap-4 border-b border-[#e1e6eb] px-7 py-5 max-[620px]:items-start max-[620px]:px-3 max-[620px]:py-3">
+      <header className="flex items-center justify-between gap-4 border-b border-[#e1e6eb] px-7 py-5 max-[620px]:flex-col max-[620px]:items-stretch max-[620px]:gap-3 max-[620px]:px-3 max-[620px]:py-3">
         <div>
           <p className="m-0 text-[10px] font-bold uppercase tracking-[.12em] text-[#777e85]">
             {isAllocatingForJob
               ? `ALLOCATING STOCK · ${selectedJobId}`
               : "Stock ledger"}
           </p>
-          <h2 className="m-0 mt-1 text-[21px] font-bold max-[620px]:text-[13px]">
+          <h2 className="m-0 mt-1 text-[21px] font-bold max-[620px]:text-[17px]">
             {isAllocatingForJob
               ? "Select items from inventory"
               : "Parts & equipment"}
           </h2>
         </div>
-        <div className="flex items-center gap-3 max-[620px]:w-full">
-          <label className="flex h-9 min-w-[180px] items-center gap-2 rounded-[6px] border border-[#d9dfe4] bg-[#f8f9fa] px-3 text-[11px] text-[#174f9a] max-[620px]:min-w-0 max-[620px]:flex-1 max-[620px]:text-[9px]">
+        <div className="flex items-center gap-3 max-[620px]:grid max-[620px]:w-full max-[620px]:grid-cols-2 max-[620px]:gap-2">
+          <label className="flex h-9 min-w-[180px] items-center gap-2 rounded-[6px] border border-[#d9dfe4] bg-[#f8f9fa] px-3 text-[11px] text-[#174f9a] max-[620px]:col-span-2 max-[620px]:h-10 max-[620px]:min-w-0 max-[620px]:w-full max-[620px]:text-[11px]">
             <span className="material-symbols-outlined text-[18px] text-[#9ba3aa]">
               search
             </span>
@@ -73,7 +73,7 @@ export default function StockLedgerTab({
           </label>
   
           {!isAllocatingForJob && !isAllocationRoute && (
-            <div className="flex rounded-full border border-[#dfe4e8] bg-[#f8fafc] p-1 text-[10px]">
+            <div className="flex rounded-full border border-[#dfe4e8] bg-[#f8fafc] p-1 text-[10px] max-[620px]:col-span-2 max-[620px]:justify-center">
               {[
                 { id: "active", label: "Active" },
                 { id: "archived", label: "Archived" },
@@ -96,7 +96,7 @@ export default function StockLedgerTab({
   
           {/* Branch Selection Dropdown */}
           {!isAdmin && (
-            <span className="flex h-9 items-center gap-2 rounded-[6px] border border-[#d9dfe4] bg-[#f8f9fa] px-3 text-[11px] font-medium text-[#174f9a] max-[620px]:hidden">
+            <span className="flex h-9 items-center gap-2 rounded-[6px] border border-[#d9dfe4] bg-[#f8f9fa] px-3 text-[11px] font-medium text-[#174f9a] max-[620px]:w-full max-[620px]:justify-between">
               <span className="material-symbols-outlined text-[17px]">
                 tune
               </span>
@@ -110,7 +110,7 @@ export default function StockLedgerTab({
               value={selectedBranch}
               onSelect={setSelectedBranch}
               ariaLabel="Filter by branch"
-              triggerClassName="max-[620px]:hidden"
+              triggerClassName="max-[620px]:w-full max-[620px]:justify-between"
             />
           )}
           <FilterMenu
@@ -119,7 +119,7 @@ export default function StockLedgerTab({
             value={selectedCategory}
             onSelect={setSelectedCategory}
             ariaLabel="Filter by category"
-            triggerClassName="max-[620px]:hidden"
+            triggerClassName="max-[620px]:w-full max-[620px]:justify-between"
           />
         </div>
       </header>
@@ -401,7 +401,7 @@ export default function StockLedgerTab({
   
                 {/* Mobile card layout */}
                 <div
-                  className={`hidden max-[620px]:mx-2 max-[620px]:mb-2 max-[620px]:flex max-[620px]:items-start max-[620px]:justify-between max-[620px]:gap-3 max-[620px]:rounded-[8px] max-[620px]:border max-[620px]:px-3 max-[620px]:py-3 max-[620px]:shadow-[0_2px_5px_rgb(31_59_82_/_8%)] ${
+                  className={`hidden max-[620px]:mx-2 max-[620px]:mb-2 max-[620px]:grid max-[620px]:grid-cols-[minmax(0,1fr)_auto] max-[620px]:items-start max-[620px]:gap-x-3 max-[620px]:gap-y-2 max-[620px]:rounded-[8px] max-[620px]:border max-[620px]:px-3 max-[620px]:py-3 max-[620px]:shadow-[0_2px_5px_rgb(31_59_82_/_8%)] ${
                     alert
                       ? "max-[620px]:border-[#ffb0a3] max-[620px]:bg-[#fff3f1]"
                       : "max-[620px]:border-[#dfe6ec] max-[620px]:bg-white"
@@ -430,7 +430,7 @@ export default function StockLedgerTab({
                           : " • not in quote")}
                     </small>
                   </div>
-                  <div className="flex flex-none flex-col items-end gap-1.5">
+                  <div className="flex flex-none flex-col items-end gap-1.5 max-[620px]:col-start-2 max-[620px]:row-start-1">
                     <span
                       className={`w-max rounded-full px-2.5 py-1 text-[10px] font-bold ${
                         inventoryStatus === "archived"
@@ -493,6 +493,32 @@ export default function StockLedgerTab({
                         </small>
                       </strong>
                     )}
+                  </div>
+                  <div className="hidden max-[620px]:col-span-2 max-[620px]:grid max-[620px]:grid-cols-3 max-[620px]:gap-2 max-[620px]:border-t max-[620px]:border-[#eef2f5] max-[620px]:pt-2">
+                    <div className="min-w-0">
+                      <span className="block text-[9px] font-bold uppercase text-[#8d969e]">
+                        Quantity
+                      </span>
+                      <strong className="block truncate text-[11px] text-[#174f9a]">
+                        {isAllocatingForJob ? availableQuantity : quantity} {unitOfMeasure || "—"}
+                      </strong>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="block text-[9px] font-bold uppercase text-[#8d969e]">
+                        Unit price
+                      </span>
+                      <strong className="block truncate text-[11px] text-[#174f9a]">
+                        {unitPrice}
+                      </strong>
+                    </div>
+                    <div className="min-w-0">
+                      <span className="block text-[9px] font-bold uppercase text-[#8d969e]">
+                        Total cost
+                      </span>
+                      <strong className="block truncate text-[11px] text-[#174f9a]">
+                        {totalCost}
+                      </strong>
+                    </div>
                   </div>
                 </div>
               </Fragment>

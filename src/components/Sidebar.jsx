@@ -61,7 +61,7 @@ function Sidebar() {
   };
 
   return (
-    <aside className="sticky top-0 flex h-screen w-[249px] flex-none flex-col bg-[#174f9a] text-white max-[1024px]:pointer-events-none max-[1024px]:fixed max-[1024px]:left-0 max-[1024px]:top-0 max-[1024px]:z-40 max-[1024px]:h-0 max-[1024px]:w-full max-[1024px]:bg-transparent">
+    <aside className="sticky top-0 flex h-screen w-[249px] flex-none flex-col bg-[#174f9a] text-white max-[1024px]:pointer-events-none max-[1024px]:fixed max-[1024px]:left-0 max-[1024px]:top-0 max-[1024px]:z-40 max-[1024px]:h-0 max-[1024px]:w-full max-[1024px]:bg-transparent max-[768px]:w-full">
       <div className="grid h-[67px] place-items-center border-b border-white/25 bg-[#1250a0] max-[1024px]:hidden">
         <img
           className="max-h-[52px] w-[150px] object-contain"
@@ -72,11 +72,11 @@ function Sidebar() {
       <button
         aria-expanded={menuOpen}
         aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
-        className="hidden border-0 bg-[#1250a0] text-white shadow-[0_3px_10px_rgb(4_35_78_/_22%)] max-[1024px]:pointer-events-auto max-[1024px]:fixed max-[1024px]:left-3 max-[1024px]:top-3 max-[1024px]:z-50 max-[1024px]:grid max-[1024px]:h-10 max-[1024px]:w-10 max-[1024px]:place-items-center max-[1024px]:rounded-[7px]"
+        className="hidden border-0 bg-[#1250a0] text-white shadow-[0_3px_10px_rgb(4_35_78_/_22%)] max-[1024px]:pointer-events-auto max-[1024px]:fixed max-[1024px]:left-3 max-[1024px]:top-3 max-[1024px]:z-50 max-[1024px]:grid max-[1024px]:h-8 max-[1024px]:w-8 max-[1024px]:place-items-center max-[1024px]:rounded-[7px] max-[640px]:!min-h-0 max-[640px]:!min-w-0 max-[480px]:left-2.5 max-[480px]:top-2.5 max-[480px]:h-7 max-[480px]:w-7"
         onClick={() => setMenuOpen((isOpen) => !isOpen)}
         type="button"
       >
-        <span className="material-symbols-outlined text-[22px]">
+        <span className="material-symbols-outlined text-[14px] leading-none max-[480px]:text-[12px]">
           {menuOpen ? "close" : "menu"}
         </span>
       </button>
@@ -91,7 +91,7 @@ function Sidebar() {
       )}
       
       <div
-        className={`px-[18px] py-7 max-[1024px]:pointer-events-auto max-[1024px]:fixed max-[1024px]:bottom-0 max-[1024px]:left-0 max-[1024px]:top-0 max-[1024px]:z-40 max-[1024px]:w-[260px] max-[1024px]:border-r max-[1024px]:border-white/15 max-[1024px]:bg-[#174f9a] max-[1024px]:p-3 max-[1024px]:pt-16 max-[1024px]:shadow-[6px_0_18px_rgb(4_35_78_/_22%)] ${menuOpen ? "" : "max-[1024px]:hidden"}`}
+        className={`px-[18px] py-7 max-[1024px]:pointer-events-auto max-[1024px]:fixed max-[1024px]:bottom-0 max-[1024px]:left-0 max-[1024px]:top-0 max-[1024px]:z-40 max-[1024px]:w-[260px] max-[1024px]:border-r max-[1024px]:border-white/15 max-[1024px]:bg-[#174f9a] max-[1024px]:p-3 max-[1024px]:pt-16 max-[1024px]:shadow-[6px_0_18px_rgb(4_35_78_/_22%)] max-[480px]:w-[84vw] max-[480px]:max-w-[280px] ${menuOpen ? "" : "max-[1024px]:hidden"}`}
       >
         <p className="mb-3 ml-4 text-[10px] font-bold uppercase tracking-[.14em] text-[#a9c7ed] max-[1024px]:hidden">
           Operation console
@@ -105,20 +105,20 @@ function Sidebar() {
             const content = (isActive = false) => (
               <>
                 <span
-                  className={`grid h-6 w-6 place-items-center rounded-[4px] transition-colors ${isActive ? "bg-[#dceaff] text-[#14519f]" : "bg-white/10 text-[#dceaff] group-hover:bg-white/15"}`}
+                  className={`mobile-sidebar-icon-well grid h-6 w-6 shrink-0 place-items-center rounded-[4px] transition-colors max-[768px]:h-5 max-[768px]:w-5 ${isActive ? "bg-[#dceaff] text-[#14519f]" : "bg-white/10 text-[#dceaff] group-hover:bg-white/15"}`}
                 >
-                  <span className="material-symbols-outlined text-[18px]">
+                  <span className="mobile-sidebar-icon material-symbols-outlined text-[16px] leading-none max-[768px]:text-[14px]">
                     {icon}
                   </span>
                 </span>
-                {name}
+                <span className="mobile-sidebar-label">{name}</span>
               </>
             );
 
             return (
               <NavLink
                 className={({ isActive }) =>
-                  `group relative flex h-10 items-center gap-3 rounded-[7px] px-3.5 text-[13px] font-medium no-underline transition-all max-[1024px]:h-10 max-[1024px]:w-full max-[1024px]:justify-start max-[1024px]:gap-3 max-[1024px]:whitespace-nowrap max-[1024px]:px-3 max-[1024px]:text-[12px] ${isActive ? "bg-white font-bold text-[#174f9a] shadow-[0_3px_10px_rgb(3_36_79_/_18%)]" : "text-[#eef5ff] hover:bg-white/10 hover:text-white"}`
+                  `group relative flex h-10 items-center gap-3 rounded-[7px] px-3.5 text-[13px] font-medium no-underline transition-all max-[1024px]:h-10 max-[1024px]:w-full max-[1024px]:justify-start max-[1024px]:gap-3 max-[1024px]:whitespace-nowrap max-[1024px]:px-3 max-[1024px]:text-[12px] max-[620px]:h-12 max-[620px]:gap-3 max-[620px]:px-3 ${isActive ? "bg-white font-bold text-[#174f9a] shadow-[0_3px_10px_rgb(3_36_79_/_18%)]" : "text-[#eef5ff] hover:bg-white/10 hover:text-white"}`
                 }
                 to={targetPath}
                 key={name}
