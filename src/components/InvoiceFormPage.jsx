@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
-import { callAuthFunction } from "../lib/auth.js";
+import { createInvoice, listInvoiceCandidates } from "../lib/api/billing.js";
 
 const formatPeso = (value) =>
   `₱${Number(value || 0).toLocaleString("en-PH", {
@@ -68,7 +68,7 @@ function InvoiceFormPage() {
 
   useEffect(() => {
     let isCurrent = true;
-    callAuthFunction("list-invoice-candidates")
+    listInvoiceCandidates()
       .then(({ candidates: incoming }) => {
         if (!isCurrent) return;
         setCandidates(Array.isArray(incoming) ? incoming : []);
@@ -153,7 +153,7 @@ function InvoiceFormPage() {
     setSaveError("");
     setIsSaving(true);
     try {
-      await callAuthFunction("create-invoice", {
+      await createInvoice({
         reportId: selected.reportId,
         dueDate: dueDate || null,
         extras: usableExtras.map((row) => ({

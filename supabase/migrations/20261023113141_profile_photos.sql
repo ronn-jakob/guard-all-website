@@ -1,7 +1,3 @@
--- Profile photos move out of browser localStorage into a private bucket, with
--- the object path kept on the user row. Reads go through short-lived signed
--- URLs minted by guard-auth, matching the report-attachment pipeline.
-
 alter table public.users add column if not exists photo_path text;
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
@@ -15,4 +11,4 @@ values (
 on conflict (id) do update set
   public = excluded.public,
   file_size_limit = excluded.file_size_limit,
-  allowed_mime_types = excluded.allowed_mime_types;
+  allowed_mime_types = excluded.allowed_mime_types;;

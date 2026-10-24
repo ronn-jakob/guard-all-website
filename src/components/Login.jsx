@@ -1,7 +1,8 @@
 import guardAllLogo from "../images/Guard All Logo Blue.png";
 import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
-import { callAuthFunction, setSession } from "../lib/auth.js";
+import { setSession } from "../lib/auth.js";
+import { login } from "../lib/api/session.js";
 const Login = () => {
   const navigate = useNavigate();
   const [showPassword, setShowPassword] = useState(false);
@@ -14,7 +15,7 @@ const Login = () => {
     setFormError("");
     setIsSubmitting(true);
     try {
-      const session = await callAuthFunction("login", {
+      const session = await login({
         email: formData.get("email"),
         password: formData.get("password"),
       });

@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { Link } from "react-router-dom";
-import { callAuthFunction, getSession } from "../lib/auth.js";
+import { getSession } from "../lib/auth.js";
+import { getDashboardSummary } from "../lib/api/dashboard.js";
+import { useAsyncData } from "../lib/hooks/useAsyncData.js";
 
 const formatPeso = (value) =>
   `₱${Number(value || 0).toLocaleString("en-PH", {
@@ -37,28 +38,10 @@ function Dashboard() {
       ? `${nameParts[0][0].toUpperCase()}. ${nameParts.slice(1).join(" ")}`
       : accountName;
 
-  const [summary, setSummary] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [loadError, setLoadError] = useState("");
-
-  useEffect(() => {
-    let isMounted = true;
-    callAuthFunction("dashboard-summary")
-      .then((result) => {
-        if (!isMounted) return;
-        setSummary(result);
-        setLoadError("");
-      })
-      .catch((error) => {
-        if (isMounted) setLoadError(error.message);
-      })
-      .finally(() => {
-        if (isMounted) setIsLoading(false);
-      });
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  const { data: summary, error: loadError, isLoading } = useAsyncData(
+    getDashboardSummary,
+    [],
+  );
 
   const counts = summary?.counts ?? {};
   const jobs = summary?.jobs ?? [];

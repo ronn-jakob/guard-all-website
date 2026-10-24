@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
-import { callAuthFunction, getSession, roleTitleFor, setSession } from "../lib/auth.js";
+import { getSession, roleTitleFor, setSession } from "../lib/auth.js";
+import {
+  changePassword,
+  createProfilePhotoUpload,
+  getProfile,
+  removeProfilePhoto,
+  updateProfile,
+  updateProfilePhoto,
+} from "../lib/api/profile.js";
 import { supabase } from "../lib/supabaseClient.js";
 import {
   PROFILE_PHOTO_MAX_BYTES,
@@ -42,7 +50,7 @@ function Settings() {
   // login cannot make a save look as though it was ignored.
   useEffect(() => {
     let isMounted = true;
-    callAuthFunction("get-profile")
+    getProfile()
       .then(({ profile: saved }) => {
         if (!isMounted || !saved) return;
         const fallbackName = splitDisplayName(saved.name || "");
@@ -107,17 +115,17 @@ function Settings() {
       if (prepared.size > PROFILE_PHOTO_MAX_BYTES) {
         throw new Error("The photo must be 5 MB or smaller.");
       }
-      const { path, token } = await callAuthFunction(
-        "create-profile-photo-upload",
-        { contentType: prepared.type, size: prepared.size },
-      );
+      const { path, token } = await createProfilePhotoUpload({
+        contentType: prepared.type,
+        size: prepared.size,
+      });
       const { error } = await supabase.storage
         .from("profile-photos")
         .uploadToSignedUrl(path, token, prepared, {
           contentType: prepared.type,
         });
       if (error) throw error;
-      const { photoUrl } = await callAuthFunction("update-profile-photo", {
+      const { photoUrl } = await updateProfilePhoto({
         path,
       });
       setProfilePhoto(photoUrl);
@@ -135,7 +143,7 @@ function Settings() {
     setProfileMessage("");
     setIsUploadingPhoto(true);
     try {
-      await callAuthFunction("remove-profile-photo");
+      await removeProfilePhoto();
       setProfilePhoto("");
       syncSessionPhoto("");
       setProfileMessage("Profile photo removed.");
@@ -158,7 +166,7 @@ function Settings() {
     }
     setIsSavingProfile(true);
     try {
-      const { profile: savedProfile } = await callAuthFunction("update-profile", {
+      const { profile: savedProfile } = await updateProfile({
         firstName: profile.firstName,
         lastName: profile.lastName,
         email: profile.email,
@@ -216,7 +224,7 @@ function Settings() {
     }
 
     try {
-      await callAuthFunction("change-password", {
+      await changePassword({
         currentPassword,
         newPassword,
       });

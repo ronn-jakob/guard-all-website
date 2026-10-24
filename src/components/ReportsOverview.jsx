@@ -2,7 +2,7 @@ import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { Link } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
-import { callAuthFunction } from "../lib/auth.js";
+import { listFieldReports, reviewFieldReport } from "../lib/api/reports.js";
 
 const statusStyles = {
   orange: "border-[#ff9f8f] bg-[#ffe5df] text-[#e05b45]",
@@ -45,7 +45,7 @@ function ReportsOverview() {
   useEffect(() => {
     let isMounted = true;
 
-    callAuthFunction("list-field-reports")
+    listFieldReports()
       .then(({ reports: incomingReports = [] }) => {
         if (!isMounted) return;
         const nextReports = Array.isArray(incomingReports)
@@ -78,9 +78,7 @@ function ReportsOverview() {
 
   // Reload the queue without discarding the current selection.
   async function refreshReports() {
-    const { reports: incomingReports = [] } = await callAuthFunction(
-      "list-field-reports",
-    );
+    const { reports: incomingReports = [] } = await listFieldReports();
     setReports(Array.isArray(incomingReports) ? incomingReports : []);
   }
 
@@ -90,7 +88,7 @@ function ReportsOverview() {
     setReviewMessage("");
     setIsReviewing(true);
     try {
-      const result = await callAuthFunction("review-field-report", {
+      const result = await reviewFieldReport({
         reportId: selectedReport.reportUuid,
         decision,
       });

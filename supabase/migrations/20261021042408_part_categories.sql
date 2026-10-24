@@ -1,7 +1,3 @@
--- Inventory categories become managed records so each one can carry the prefix
--- used to generate item codes (DMP-007). parts.category stays as the display
--- text every read path already uses; parts.category_id is the durable link.
-
 create table if not exists public.part_categories (
   category_id uuid primary key default gen_random_uuid(),
   name text not null,
@@ -22,9 +18,6 @@ alter table public.parts
   add column if not exists category_id uuid references public.part_categories(category_id);
 create index if not exists parts_category_id_idx on public.parts (category_id);
 
--- Seed the categories the ledger already uses, preserving their spelling so the
--- one 'misc' part still matches. Prefixes are editable in Manage categories;
--- existing SKUs are never rewritten.
 insert into public.part_categories (name, code_prefix)
 select seed.name, seed.code_prefix
 from (values
@@ -46,7 +39,6 @@ where part.category_id is null
   and part.category is not null
   and lower(trim(part.category)) = lower(category.name);
 
--- Category changes appear in the audit log like every other business table.
 create or replace function public.gioms_write_audit_log_categories()
 returns trigger
 language plpgsql
@@ -95,4 +87,4 @@ grant execute on function public.gioms_write_audit_log_categories() to service_r
 drop trigger if exists trg_audit_part_categories on public.part_categories;
 create trigger trg_audit_part_categories
   after insert or update or delete on public.part_categories
-  for each row execute function public.gioms_write_audit_log_categories();
+  for each row execute function public.gioms_write_audit_log_categories();;

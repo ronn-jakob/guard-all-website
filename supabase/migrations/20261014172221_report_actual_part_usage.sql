@@ -215,4 +215,4 @@ END;
 $function$;
 
 REVOKE ALL ON FUNCTION public.gioms_submit_field_report_with_usage(uuid, uuid, text, text, text, text, date, time, boolean, text, text, jsonb, jsonb) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.gioms_submit_field_report_with_usage(uuid, uuid, text, text, text, text, date, time, boolean, text, text, jsonb, jsonb) TO service_role;
+GRANT EXECUTE ON FUNCTION public.gioms_submit_field_report_with_usage(uuid, uuid, text, text, text, text, date, time, boolean, text, text, jsonb, jsonb) TO service_role;;

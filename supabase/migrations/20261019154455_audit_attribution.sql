@@ -1,13 +1,3 @@
--- Audit attribution, template coverage, and read-path indexes.
---
--- Row-level audit triggers already existed, but every row landed with
--- changed_by = NULL: the trigger read the app.user_id GUC, and the Edge
--- Functions write through PostgREST with the service role, so that setting is
--- never present. gioms_current_actor() keeps the GUC as the first choice and
--- falls back to the x-guard-actor header that guard-auth/guard-account attach to
--- their PostgREST client. If the header is ever missing the result stays NULL
--- (unattributed) rather than failing the write.
-
 create or replace function public.gioms_current_actor()
 returns uuid
 language sql
@@ -25,9 +15,6 @@ revoke all on function public.gioms_current_actor() from anon;
 revoke all on function public.gioms_current_actor() from authenticated;
 grant execute on function public.gioms_current_actor() to service_role;
 
--- Point both existing audit trigger functions at the resolver. Rewriting the
--- stored definition keeps the 20 existing triggers attached and leaves every
--- other line (JSON snapshot, password_hash stripping, key mapping) untouched.
 do $migration$
 declare
   definition text;
@@ -68,8 +55,6 @@ begin
 end
 $migration$;
 
--- Template pricing had no audit coverage at all. It gets its own trigger
--- function so the two existing functions (and their triggers) stay untouched.
 create or replace function public.gioms_write_audit_log_templates()
 returns trigger
 language plpgsql
@@ -136,11 +121,9 @@ create trigger trg_audit_job_template_items
   after insert or update or delete on public.job_template_items
   for each row execute function public.gioms_write_audit_log_templates();
 
--- Chronological listing, actor filtering, and table filtering. The existing
--- (table_name, record_id) and record_key GIN indexes stay for per-record views.
 create index if not exists idx_audit_log_changed_at
   on public.audit_log (changed_at desc, audit_id desc);
 create index if not exists idx_audit_log_actor
   on public.audit_log (changed_by, changed_at desc);
 create index if not exists idx_audit_log_table_time
-  on public.audit_log (table_name, changed_at desc);
+  on public.audit_log (table_name, changed_at desc);;

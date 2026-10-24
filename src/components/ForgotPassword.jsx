@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import guardAllLogo from "../images/Guard All Logo Blue.png";
-import { callAuthFunction } from "../lib/auth.js";
+import { requestPasswordReset } from "../lib/api/session.js";
 
 function ForgotPassword() {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -19,7 +19,7 @@ function ForgotPassword() {
     setMessage("");
     setIsSubmitting(true);
     try {
-      const result = await callAuthFunction("request-password-reset", {
+      const result = await requestPasswordReset({
         email,
       });
       setMessage(result.message);

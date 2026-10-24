@@ -1,7 +1,13 @@
 import { useEffect, useState } from "react";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
-import { callAuthFunction } from "../lib/auth.js";
+import {
+  createAccount,
+  deleteUser,
+  listPasswordResetRequests,
+  listUsers,
+  resolvePasswordReset,
+} from "../lib/api/accounts.js";
 import ConfirmPasswordDialog from "./ConfirmPasswordDialog.jsx";
 
 const roles = [
@@ -47,7 +53,7 @@ function Account() {
 
   useEffect(() => {
     let isMounted = true;
-    callAuthFunction("list-users")
+    listUsers()
       .then(({ accounts: storedAccounts }) => {
         if (isMounted)
           setAccounts((storedAccounts || []).map(normalizeAccountRole));
@@ -62,7 +68,7 @@ function Account() {
 
   useEffect(() => {
     let isMounted = true;
-    callAuthFunction("list-password-reset-requests")
+    listPasswordResetRequests()
       .then(({ requests: incomingRequests }) => {
         if (isMounted)
           setPendingResetRequests(
@@ -91,9 +97,7 @@ function Account() {
 
   async function loadResetRequests() {
     try {
-      const { requests: incomingRequests } = await callAuthFunction(
-        "list-password-reset-requests",
-      );
+      const { requests: incomingRequests } = await listPasswordResetRequests();
       setPendingResetRequests(
         Array.isArray(incomingRequests) ? incomingRequests : [],
       );
@@ -109,7 +113,7 @@ function Account() {
     setIssuedPassword("");
     setResolvingResetId(requestId);
     try {
-      const result = await callAuthFunction("resolve-password-reset", {
+      const result = await resolvePasswordReset({
         requestId,
         decision,
       });
@@ -134,7 +138,7 @@ function Account() {
     const branch = formData.get("branch").toLowerCase();
 
     try {
-      const { account } = await callAuthFunction("create-account", {
+      const { account } = await createAccount({
         firstName,
         lastName,
         email,
@@ -162,7 +166,7 @@ function Account() {
     setSuccessMessage("");
     setIsDeletingAccount(true);
     try {
-      await callAuthFunction("delete-user", {
+      await deleteUser({
         userId: pendingDeletion.id,
         password,
       });

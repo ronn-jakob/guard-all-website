@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
-import { callAuthFunction, getSession } from "../lib/auth.js";
+import { getSession } from "../lib/auth.js";
+import {
+  deleteJobTemplate,
+  listJobTemplates,
+  listParts,
+  saveJobTemplate,
+} from "../lib/api/templates.js";
 import ConfirmPasswordDialog from "./ConfirmPasswordDialog.jsx";
 
 const jobTypes = [
@@ -111,8 +117,8 @@ function JobTemplates() {
   useEffect(() => {
     let isMounted = true;
     Promise.all([
-      callAuthFunction("list-job-templates"),
-      callAuthFunction("list-parts"),
+      listJobTemplates(),
+      listParts(),
     ])
       .then(([templateResult, partResult]) => {
         if (!isMounted) return;
@@ -179,9 +185,7 @@ function JobTemplates() {
   }
 
   async function reload(selectId) {
-    const { templates: incoming = [] } = await callAuthFunction(
-      "list-job-templates",
-    );
+    const { templates: incoming = [] } = await listJobTemplates();
     const next = Array.isArray(incoming) ? incoming : [];
     setTemplates(next);
     const target = selectId
@@ -195,7 +199,7 @@ function JobTemplates() {
     setDeleteError("");
     setIsDeleting(true);
     try {
-      const result = await callAuthFunction("delete-job-template", {
+      const result = await deleteJobTemplate({
         templateId: draft.id,
         password,
       });
@@ -246,7 +250,7 @@ function JobTemplates() {
 
     setIsSaving(true);
     try {
-      const { templateId } = await callAuthFunction("save-job-template", {
+      const { templateId } = await saveJobTemplate({
         templateId: draft.id,
         name: draft.name,
         jobType: draft.jobType,

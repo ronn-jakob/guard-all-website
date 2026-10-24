@@ -2,7 +2,15 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
-import { callAuthFunction, getSession } from "../lib/auth.js";
+import { getSession } from "../lib/auth.js";
+import {
+  createJobFromTemplate,
+  getSchedule,
+  listClients,
+  listTechnicians,
+  updateSchedule,
+} from "../lib/api/scheduling.js";
+import { listJobTemplates } from "../lib/api/templates.js";
 import { dateParamKey } from "../lib/dates.js";
 
 const fieldClass =
@@ -100,7 +108,7 @@ function JobFormPage() {
 
   useEffect(() => {
     let alive = true;
-    callAuthFunction("list-job-templates")
+    listJobTemplates()
       .then(({ templates: incoming }) => {
         if (alive) setTemplates(Array.isArray(incoming) ? incoming : []);
       })
@@ -120,7 +128,7 @@ function JobFormPage() {
     const payload = {};
     if (date) payload.date = date;
     if (order) payload.excludeOrder = order;
-    callAuthFunction("list-technicians", payload)
+    listTechnicians(payload)
       .then(({ technicians: incoming }) => {
         if (alive) setTechnicians(Array.isArray(incoming) ? incoming : []);
       })
@@ -134,7 +142,7 @@ function JobFormPage() {
 
   useEffect(() => {
     let alive = true;
-    callAuthFunction("list-clients", {})
+    listClients({})
       .then(({ clients: incoming }) => {
         if (alive) setClients(Array.isArray(incoming) ? incoming : []);
       })
@@ -149,7 +157,7 @@ function JobFormPage() {
   useEffect(() => {
     if (!order) return undefined;
     let alive = true;
-    callAuthFunction("get-schedule", { order })
+    getSchedule({ order })
       .then(({ job }) => {
         if (!alive || !job) return;
         setEditJob(job);
@@ -199,7 +207,7 @@ function JobFormPage() {
     if (clientTimer.current) clearTimeout(clientTimer.current);
     clientTimer.current = setTimeout(() => {
       setIsSearchingClients(true);
-      callAuthFunction("list-clients", { search: value })
+      listClients({ search: value })
         .then(({ clients: incoming }) => {
           setClients(Array.isArray(incoming) ? incoming : []);
         })
@@ -265,7 +273,7 @@ function JobFormPage() {
     setIsSaving(true);
     try {
       if (isEdit) {
-        await callAuthFunction("update-schedule", {
+        await updateSchedule({
           order,
           serviceType: editJob?.service || "Service call",
           date,
@@ -276,7 +284,7 @@ function JobFormPage() {
           technicianIds: selectedTechnicians,
         });
       } else {
-        await callAuthFunction("create-job-from-template", {
+        await createJobFromTemplate({
           clientId: clientMode === "existing" ? clientId : null,
           firstName: newClient.firstName,
           lastName: newClient.lastName,

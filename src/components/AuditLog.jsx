@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
-import { callAuthFunction } from "../lib/auth.js";
+import { listAuditLog } from "../lib/api/audit.js";
 import {
   AUDITED_TABLES,
   actionLabel,
@@ -79,7 +79,7 @@ function AuditLog() {
     // renders while it is in flight.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
-    callAuthFunction("list-audit-log", buildAuditRequest(filters, { offset, limit: PAGE_SIZE }))
+    listAuditLog(buildAuditRequest(filters, { offset, limit: PAGE_SIZE }))
       .then((data) => {
         if (!isCurrent) return;
         const incoming = Array.isArray(data.entries) ? data.entries : [];

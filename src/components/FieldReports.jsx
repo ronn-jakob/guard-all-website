@@ -2,18 +2,23 @@ import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { callAuthFunction, getSession } from "../lib/auth.js";
+import { getSession } from "../lib/auth.js";
+import {
+  createReportUpload,
+  discardReportUpload,
+  listFieldReportJobs,
+  listFieldReports,
+  resubmitFieldReport,
+  submitFieldReport,
+} from "../lib/api/reports.js";
 import { supabase } from "../lib/supabaseClient.js";
+import ReportDetailDialog from "../features/reports/ReportDetailDialog.jsx";
+import ReportEditDialog from "../features/reports/ReportEditDialog.jsx";
+import { card, input, label } from "../features/reports/reportStyles.js";
 
 const ATTACHMENT_BUCKET = "report-attachments";
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const MAX_ATTACHMENTS = 5;
-
-const input =
-  "mt-1 h-10 w-full rounded-[5px] border border-[#cbd8e7] bg-[#eef4ff] px-3 text-[14px] text-[#4d6075] outline-none";
-const card =
-  "rounded-[10px] border border-[#dfe6ec] bg-white p-3 shadow-[0_2px_5px_rgb(31_59_82_/_8%)]";
-const label = "text-[12px] font-bold uppercase tracking-[.06em] text-[#778593]";
 
 const reportStatusStyles = {
   orange: "border-[#ff9f8f] bg-[#ffe5df] text-[#e05b45]",
@@ -55,19 +60,6 @@ async function prepareImageForUpload(file) {
   } catch {
     return file;
   }
-}
-
-function ReportField({ fieldLabel, value }) {
-  return (
-    <div className="rounded-[6px] border border-[#e1e6eb] bg-[#f8fbff] px-3 py-2">
-      <span className="block text-[11px] font-bold uppercase tracking-[.06em] text-[#7d8994]">
-        {fieldLabel}
-      </span>
-      <strong className="mt-1 block text-[13px] font-semibold text-[#174276]">
-        {value || "—"}
-      </strong>
-    </div>
-  );
 }
 
 function FieldReports() {
@@ -127,8 +119,7 @@ function FieldReports() {
 
   useEffect(() => {
     let isMounted = true;
-    callAuthFunction(
-      "list-field-reports",
+    listFieldReports(
       technicianFilter ? { technicianId: technicianFilter } : {},
     )
       .then(({ reports: incomingReports = [], technicians: incomingTechnicians = [] }) => {
@@ -157,7 +148,7 @@ function FieldReports() {
 
   useEffect(() => {
     let isMounted = true;
-    callAuthFunction("list-field-report-jobs")
+    listFieldReportJobs()
       .then(({ jobs: assignedJobs }) => {
         if (!isMounted) return;
         const nextJobs = assignedJobs || [];
@@ -252,7 +243,7 @@ function FieldReports() {
         }
         // The bucket is private: ask the Edge Function for a one-off signed
         // upload URL, then put the file straight into storage.
-        const { path, token } = await callAuthFunction("create-report-upload", {
+        const { path, token } = await createReportUpload({
           jobId: selectedJob.jobId,
           fileName: prepared.name,
           contentType: prepared.type,
@@ -291,9 +282,7 @@ function FieldReports() {
     );
     if (image.path) {
       // Best effort: an orphaned object is harmless, and the bucket is private.
-      callAuthFunction("discard-report-upload", { path: image.path }).catch(
-        () => {},
-      );
+      discardReportUpload({ path: image.path }).catch(() => {});
     }
   }
 
@@ -328,7 +317,7 @@ function FieldReports() {
     setResubmitError("");
     setIsResubmitting(true);
     try {
-      await callAuthFunction("resubmit-field-report", {
+      await resubmitFieldReport({
         reportId: editReport.reportUuid,
         ...editValues,
       });
@@ -390,7 +379,7 @@ function FieldReports() {
     setSubmitError("");
 
     try {
-      await callAuthFunction("submit-field-report", {
+      await submitFieldReport({
         jobId: selectedJob.jobId,
         clientName: formValues.clientName,
         jobNumber: formValues.jobNumber,
@@ -950,375 +939,24 @@ function FieldReports() {
       </section>
 
       {openReport && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#071426]/65 p-4 max-[620px]:items-end max-[620px]:p-0"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setOpenReport(null);
-          }}
-        >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="submitted-report-title"
-            className="flex max-h-[92vh] w-full max-w-[880px] flex-col overflow-hidden rounded-[10px] bg-white text-[#174276] shadow-[0_20px_60px_rgb(7_20_38_/_35%)] max-[620px]:max-h-[95vh] max-[620px]:rounded-b-none max-[620px]:rounded-t-[12px]"
-          >
-            <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[#e1e6eb] px-6 py-5 max-[620px]:px-4">
-              <div className="min-w-0">
-                <p className="m-0 text-[11px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
-                  {openReport.id} · {openReport.status}
-                </p>
-                <h2
-                  id="submitted-report-title"
-                  className="m-0 mt-1 text-[22px] font-bold"
-                >
-                  {openReport.client}
-                </h2>
-                <p className="m-0 mt-1 text-[12px] text-[#7d8994]">
-                  {openReport.service} · {openReport.technician}
-                </p>
-              </div>
-              <button
-                type="button"
-                aria-label="Close report details"
-                onClick={() => setOpenReport(null)}
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-[6px] border border-[#dfe6ec] bg-white text-[23px] leading-none text-[#718090] hover:bg-[#f4f8ff]"
-              >
-                ×
-              </button>
-            </header>
-
-            <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5 max-[620px]:px-4">
-              <section className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
-                <ReportField
-                  fieldLabel="Service date"
-                  value={openReport.serviceDate}
-                />
-                <ReportField
-                  fieldLabel="Time on site"
-                  value={openReport.arrivalTime}
-                />
-                <ReportField fieldLabel="Submitted" value={openReport.time} />
-                <ReportField
-                  fieldLabel="Billing readiness"
-                  value={openReport.billing?.readiness}
-                />
-                <ReportField
-                  fieldLabel="Site address"
-                  value={openReport.siteAddress}
-                />
-                <ReportField
-                  fieldLabel="Client sign-off"
-                  value={openReport.signature?.signer}
-                />
-              </section>
-
-              <section>
-                <h3 className="m-0 text-[12px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
-                  Work summary
-                </h3>
-                <p className="m-0 mt-2 text-[13px] leading-relaxed text-[#52677c]">
-                  {openReport.workSummary}
-                </p>
-              </section>
-
-              {(openReport.issueDescription ||
-                openReport.recommendations ||
-                openReport.additionalNotes) && (
-                <section className="space-y-3">
-                  {openReport.issueDescription && (
-                    <div>
-                      <h3 className="m-0 text-[12px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
-                        Issue found
-                      </h3>
-                      <p className="m-0 mt-1 text-[13px] leading-relaxed text-[#52677c]">
-                        {openReport.issueDescription}
-                      </p>
-                    </div>
-                  )}
-                  {openReport.recommendations && (
-                    <div>
-                      <h3 className="m-0 text-[12px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
-                        Recommendations
-                      </h3>
-                      <p className="m-0 mt-1 text-[13px] leading-relaxed text-[#52677c]">
-                        {openReport.recommendations}
-                      </p>
-                    </div>
-                  )}
-                  {openReport.additionalNotes && (
-                    <div>
-                      <h3 className="m-0 text-[12px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
-                        Additional notes
-                      </h3>
-                      <p className="m-0 mt-1 text-[13px] leading-relaxed text-[#52677c]">
-                        {openReport.additionalNotes}
-                      </p>
-                    </div>
-                  )}
-                </section>
-              )}
-
-              <section>
-                <h3 className="m-0 text-[12px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
-                  Parts used
-                </h3>
-                {openReport.parts.length === 0 ? (
-                  <p className="m-0 mt-2 text-[12px] text-[#8b949c]">
-                    No parts were recorded for this report.
-                  </p>
-                ) : (
-                  <div className="mt-2 overflow-x-auto rounded-[7px] border border-[#dfe6ec]">
-                    <table className="w-full min-w-[420px] border-collapse text-left text-[12px]">
-                      <thead className="bg-[#f3f7fd] text-[#68798a]">
-                        <tr>
-                          <th className="px-3 py-2 font-bold">Item</th>
-                          <th className="px-3 py-2 font-bold">Description</th>
-                          <th className="px-3 py-2 font-bold">Qty</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {openReport.parts.map((part, index) => (
-                          <tr
-                            className="border-t border-[#e8edf2]"
-                            key={`${part.sku}-${index}`}
-                          >
-                            <td className="px-3 py-2 font-bold text-[#35649a]">
-                              {part.sku}
-                            </td>
-                            <td className="px-3 py-2 text-[#52677c]">
-                              {part.description}
-                            </td>
-                            <td className="px-3 py-2 text-[#52677c]">
-                              {part.quantity}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </section>
-
-              {openReport.images.length > 0 && (
-                <section>
-                  <h3 className="m-0 text-[12px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
-                    Attached images
-                  </h3>
-                  <div className="mt-2 grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
-                    {openReport.images.map((image, index) => (
-                      <figure
-                        className="m-0 overflow-hidden rounded-[7px] border border-[#dfe6ec] bg-[#f3f7fd]"
-                        key={`${image.name}-${index}`}
-                      >
-                        {image.src ? (
-                          <img
-                            className="h-[190px] w-full object-cover"
-                            src={image.src}
-                            alt={image.alt}
-                            loading="lazy"
-                          />
-                        ) : null}
-                        <figcaption className="px-3 py-2 text-[11px] text-[#68798a]">
-                          {image.name}
-                        </figcaption>
-                      </figure>
-                    ))}
-                  </div>
-                </section>
-              )}
-            </div>
-
-            <footer className="flex shrink-0 justify-end gap-2 border-t border-[#e1e6eb] bg-[#f8fbff] px-6 py-4 max-[620px]:px-4">
-              {openReport.reviewStatus === "returned" && !canFilterByTechnician && (
-                <button
-                  type="button"
-                  onClick={() => openReportEditor(openReport)}
-                  className="rounded-[6px] border border-[#1250a0] bg-white px-5 py-2.5 text-[12px] font-bold text-[#1250a0] hover:bg-[#f2f7ff]"
-                >
-                  Edit and resubmit
-                </button>
-              )}
-              <button
-                type="button"
-                onClick={() => setOpenReport(null)}
-                className="rounded-[6px] bg-[#1250a0] px-5 py-2.5 text-[12px] font-bold text-white hover:bg-[#0d438a]"
-              >
-                Close
-              </button>
-            </footer>
-          </section>
-        </div>
+        <ReportDetailDialog
+          openReport={openReport}
+          setOpenReport={setOpenReport}
+          openReportEditor={openReportEditor}
+          canFilterByTechnician={canFilterByTechnician}
+        />
       )}
 
       {editReport && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-[#071426]/65 p-4 max-[620px]:items-end max-[620px]:p-0"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setEditReport(null);
-          }}
-        >
-          <section
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Edit ${editReport.id}`}
-            className="flex max-h-[92vh] w-full max-w-[680px] flex-col overflow-hidden rounded-[10px] bg-white text-[#174276] shadow-[0_20px_60px_rgb(7_20_38_/_35%)] max-[620px]:max-h-[95vh] max-[620px]:rounded-b-none max-[620px]:rounded-t-[12px]"
-          >
-            <header className="shrink-0 border-b border-[#e1e6eb] px-6 py-5 max-[620px]:px-4">
-              <p className="m-0 text-[11px] font-bold uppercase tracking-[.08em] text-[#7d8994]">
-                {editReport.id} · returned for correction
-              </p>
-              <h2 className="m-0 mt-1 text-[20px] font-bold">
-                Correct and resubmit
-              </h2>
-              <p className="m-0 mt-1 text-[12px] text-[#7d8994]">
-                {editReport.client} · {editReport.service}
-              </p>
-            </header>
-
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-5 max-[620px]:px-4">
-              <div className="grid grid-cols-2 gap-3 max-[620px]:grid-cols-1">
-                <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
-                  Service date
-                  <input
-                    type="date"
-                    className={input}
-                    value={editValues.serviceDate}
-                    onChange={(event) =>
-                      updateEditValue("serviceDate", event.target.value)
-                    }
-                  />
-                </label>
-                <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
-                  Arrival time
-                  <input
-                    type="time"
-                    className={input}
-                    value={editValues.arrivalTime}
-                    onChange={(event) =>
-                      updateEditValue("arrivalTime", event.target.value)
-                    }
-                  />
-                </label>
-              </div>
-
-              <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
-                Work performed
-                <textarea
-                  rows={3}
-                  className={`${input} h-auto py-2`}
-                  value={editValues.workPerformed}
-                  onChange={(event) =>
-                    updateEditValue("workPerformed", event.target.value)
-                  }
-                />
-              </label>
-
-              <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
-                Issue found
-                <textarea
-                  rows={2}
-                  className={`${input} h-auto py-2`}
-                  value={editValues.issueDescription}
-                  onChange={(event) =>
-                    updateEditValue("issueDescription", event.target.value)
-                  }
-                />
-              </label>
-
-              <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
-                Recommendations
-                <textarea
-                  rows={2}
-                  className={`${input} h-auto py-2`}
-                  value={editValues.recommendations}
-                  onChange={(event) =>
-                    updateEditValue("recommendations", event.target.value)
-                  }
-                />
-              </label>
-
-              <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
-                Additional notes
-                <textarea
-                  rows={2}
-                  className={`${input} h-auto py-2`}
-                  value={editValues.additionalNotes}
-                  onChange={(event) =>
-                    updateEditValue("additionalNotes", event.target.value)
-                  }
-                />
-              </label>
-
-              <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
-                Site address
-                <input
-                  className={input}
-                  value={editValues.siteAddress}
-                  onChange={(event) =>
-                    updateEditValue("siteAddress", event.target.value)
-                  }
-                />
-              </label>
-
-              <label className="flex items-center gap-2 text-[12px] font-semibold text-[#45515c]">
-                <input
-                  type="checkbox"
-                  checked={editValues.clientSignoff}
-                  onChange={(event) =>
-                    updateEditValue("clientSignoff", event.target.checked)
-                  }
-                  className="h-4 w-4 rounded border-gray-300 text-[#1250a0] focus:ring-[#1250a0]"
-                />
-                Client signed off
-              </label>
-
-              {editValues.clientSignoff && (
-                <label className="flex flex-col text-[12px] font-semibold text-[#45515c]">
-                  Signed by
-                  <input
-                    className={input}
-                    value={editValues.clientSignoffName}
-                    onChange={(event) =>
-                      updateEditValue("clientSignoffName", event.target.value)
-                    }
-                  />
-                </label>
-              )}
-
-              <p className="m-0 rounded-[6px] border border-[#e1e6eb] bg-[#f8fbff] px-3 py-2 text-[11px] text-[#607286]">
-                Parts and stock usage stay exactly as first recorded. Correct the
-                narrative, then resubmit for review.
-              </p>
-
-              {resubmitError && (
-                <p
-                  className="m-0 rounded-[6px] border border-[#f0b8b0] bg-[#fff1ee] px-3 py-2 text-[12px] text-[#b64132]"
-                  role="alert"
-                >
-                  {resubmitError}
-                </p>
-              )}
-            </div>
-
-            <footer className="flex shrink-0 justify-end gap-2 border-t border-[#e1e6eb] bg-[#f8fbff] px-6 py-4 max-[620px]:px-4">
-              <button
-                type="button"
-                onClick={() => setEditReport(null)}
-                className="rounded-[6px] border border-[#dfe6ec] bg-white px-5 py-2.5 text-[12px] font-bold text-[#5e6b78] hover:bg-[#f2f7ff]"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleResubmit}
-                disabled={isResubmitting}
-                className="rounded-[6px] bg-[#1250a0] px-5 py-2.5 text-[12px] font-bold text-white hover:bg-[#0d438a] disabled:opacity-50"
-              >
-                {isResubmitting ? "Resubmitting..." : "Resubmit for review"}
-              </button>
-            </footer>
-          </section>
-        </div>
+        <ReportEditDialog
+          editReport={editReport}
+          setEditReport={setEditReport}
+          editValues={editValues}
+          updateEditValue={updateEditValue}
+          handleResubmit={handleResubmit}
+          isResubmitting={isResubmitting}
+          resubmitError={resubmitError}
+        />
       )}
     </main>
   );

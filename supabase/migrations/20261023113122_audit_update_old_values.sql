@@ -1,15 +1,8 @@
--- Update rows never captured their before-state: the trigger only assigned
--- old_row for DELETE, so every audit row with action='update' has old_values
--- NULL and the diff view showed all fields as newly added. Rewrite all four
--- audit trigger functions to snapshot OLD for UPDATE as well.
-
 do $migration$
 declare
   function_name text;
   definition text;
   rewritten text;
-  -- Matches both the uppercase original and the lowercase copies added for
-  -- templates/categories, across CRLF or LF bodies.
   pattern text := 'IF\s+TG_OP\s*=\s*''DELETE''\s+THEN\s+old_row\s*:=\s*to_jsonb\(OLD\);\s+chosen_row\s*:=\s*old_row;\s+ELSE\s+new_row\s*:=\s*to_jsonb\(NEW\);\s+chosen_row\s*:=\s*new_row;\s+END\s+IF;';
   replacement text := 'IF TG_OP <> ''INSERT'' THEN old_row := to_jsonb(OLD); END IF; IF TG_OP <> ''DELETE'' THEN new_row := to_jsonb(NEW); END IF; chosen_row := COALESCE(new_row, old_row);';
 begin
@@ -38,4 +31,4 @@ begin
     execute rewritten;
   end loop;
 end
-$migration$;
+$migration$;;

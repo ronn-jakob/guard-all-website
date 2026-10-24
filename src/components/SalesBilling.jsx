@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
-import { callAuthFunction } from "../lib/auth.js";
+import { listInvoices, recordPayment } from "../lib/api/billing.js";
 import {
   buildBillingBreakdown,
   filterInvoicesByPeriod,
@@ -81,7 +81,7 @@ function SalesBilling() {
 
   useEffect(() => {
     let isCurrent = true;
-    callAuthFunction("list-invoices")
+    listInvoices()
       .then(({ invoices: incoming }) => {
         if (!isCurrent) return;
         setInvoices(Array.isArray(incoming) ? incoming : []);
@@ -684,7 +684,7 @@ function PaymentDialog({ invoice, onClose, onSaved }) {
     setError("");
     setIsSaving(true);
     try {
-      await callAuthFunction("record-payment", {
+      await recordPayment({
         invoiceId: invoice.id,
         amount: value,
         method,
