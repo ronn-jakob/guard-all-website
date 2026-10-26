@@ -134,14 +134,14 @@ function InvoiceFormPage() {
       usableExtras.some(
         (row) =>
           !row.description.trim() ||
-          !Number.isFinite(Number(row.quantity)) ||
-          Number(row.quantity) <= 0 ||
+          !Number.isInteger(Number(row.quantity)) ||
+          Number(row.quantity) < 1 ||
           !Number.isFinite(Number(row.unitPrice)) ||
           Number(row.unitPrice) < 0,
       )
     ) {
       setSaveError(
-        "Every extra line needs a description, a quantity above zero, and a price of zero or more.",
+        "Every extra line needs a description, a whole-number quantity of 1 or more, and a price of zero or more.",
       );
       return;
     }
@@ -430,8 +430,8 @@ function InvoiceFormPage() {
                               Qty
                               <input
                                 type="number"
-                                min="0.01"
-                                step="0.01"
+                                min="1"
+                                step="1"
                                 className={`${fieldClass} text-center`}
                                 value={row.quantity}
                                 onChange={(event) =>

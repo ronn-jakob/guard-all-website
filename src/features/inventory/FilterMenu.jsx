@@ -12,7 +12,7 @@ const MENU_MAX_HEIGHT = 320;
 const MENU_MIN_HEIGHT = 96;
 
 const triggerClass =
-  "flex h-9 items-center gap-2 rounded-[6px] border border-[#d9dfe4] bg-[#f8f9fa] px-3 text-[11px] font-medium text-[#174f9a] transition-colors hover:bg-[#eff4f9]";
+  "flex h-9 items-center gap-2 whitespace-nowrap rounded-[6px] border border-[#d9dfe4] bg-[#f8f9fa] px-3 text-[11px] font-medium text-[#174f9a] transition-colors hover:bg-[#eff4f9]";
 
 // Measured tight to the trigger: right-aligned, below it unless there is not
 // enough room, and never taller than the space actually available.

@@ -1,4 +1,5 @@
 import { formatCurrency } from "./inventoryUtils.js";
+import { skuMatchesPrefix } from "../../lib/inventoryCategories.js";
 
 export default function InventoryItemFormDialog({
   isEditItem,
@@ -23,6 +24,7 @@ export default function InventoryItemFormDialog({
   setNewItemUnitPrice,
   newItemTotalCost,
   activeCategories,
+  categories,
   categoryNameById,
   onNewCategory,
   isLoadingCategories,
@@ -30,6 +32,24 @@ export default function InventoryItemFormDialog({
   formError,
   isSavingItem,
 }) {
+  // A part that still carries its old category's prefix is renumbered by the
+  // server on save, so the read-only field previews the code it will receive.
+  const currentCategory = (categories ?? []).find(
+    (category) => category.id === selectedItem?.[17],
+  );
+  const nextCategory = (categories ?? []).find(
+    (category) => category.id === selectedCategoryId,
+  );
+  const willRenumber =
+    isEditItem &&
+    Boolean(currentCategory) &&
+    Boolean(nextCategory) &&
+    currentCategory.id !== nextCategory.id &&
+    skuMatchesPrefix(selectedItem?.[2], currentCategory.prefix);
+  const previewSku = willRenumber
+    ? nextCategory.nextSku || nextSkuFor(nextCategory.id)
+    : manualSku;
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-[#071426]/75 p-4 backdrop-blur-[2px] max-[620px]:items-end max-[620px]:p-0"
@@ -85,7 +105,7 @@ export default function InventoryItemFormDialog({
                 name="sku"
                 value={
                   isEditItem
-                    ? manualSku
+                    ? previewSku
                     : skuMode === "auto"
                       ? generatedSku
                       : manualSku
@@ -124,6 +144,12 @@ export default function InventoryItemFormDialog({
                     Use generated code
                   </button>
                 ))}
+              {willRenumber && (
+                <small className="mt-1 block text-[11px] text-[#ffd08a]">
+                  Code will change from {selectedItem[2]} to {previewSku} when
+                  you save.
+                </small>
+              )}
             </label>
             <label className="text-[14px] font-medium text-[#a9bfd9]">
               Part Name <span className="text-[#ff6557]">*</span>

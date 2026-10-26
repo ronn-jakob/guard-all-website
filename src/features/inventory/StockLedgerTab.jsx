@@ -43,11 +43,13 @@ export default function StockLedgerTab({
   setSelectedCategory,
   setSelectedItemCode,
   setStockAdjustment,
+  setStockLevelFilter,
+  stockLevelFilter,
 }) {
   return (
     <>
-      <header className="flex items-center justify-between gap-4 border-b border-[#e1e6eb] px-7 py-5 max-[620px]:flex-col max-[620px]:items-stretch max-[620px]:gap-3 max-[620px]:px-3 max-[620px]:py-3">
-        <div>
+      <header className="flex flex-col items-stretch gap-3 border-b border-[#e1e6eb] px-7 py-5 max-[620px]:px-3 max-[620px]:py-3 min-[1440px]:flex-row min-[1440px]:items-center min-[1440px]:justify-between min-[1440px]:gap-4">
+        <div className="min-w-0">
           <p className="m-0 text-[10px] font-bold uppercase tracking-[.12em] text-[#777e85]">
             {isAllocatingForJob
               ? `ALLOCATING STOCK · ${selectedJobId}`
@@ -59,8 +61,8 @@ export default function StockLedgerTab({
               : "Parts & equipment"}
           </h2>
         </div>
-        <div className="flex items-center gap-3 max-[620px]:grid max-[620px]:w-full max-[620px]:grid-cols-2 max-[620px]:gap-2">
-          <label className="flex h-9 min-w-[180px] items-center gap-2 rounded-[6px] border border-[#d9dfe4] bg-[#f8f9fa] px-3 text-[11px] text-[#174f9a] max-[620px]:col-span-2 max-[620px]:h-10 max-[620px]:min-w-0 max-[620px]:w-full max-[620px]:text-[11px]">
+        <div className="flex flex-wrap items-center justify-start gap-2 max-[620px]:grid max-[620px]:w-full max-[620px]:grid-cols-2 min-[1440px]:justify-end min-[1440px]:gap-3">
+          <label className="flex h-9 min-w-[200px] max-w-[320px] flex-1 items-center gap-2 rounded-[6px] border border-[#d9dfe4] bg-[#f8f9fa] px-3 text-[11px] text-[#174f9a] max-[620px]:col-span-2 max-[620px]:h-10 max-[620px]:min-w-0 max-[620px]:max-w-none max-[620px]:w-full max-[620px]:text-[11px]">
             <span className="material-symbols-outlined text-[18px] text-[#9ba3aa]">
               search
             </span>
@@ -121,6 +123,18 @@ export default function StockLedgerTab({
             ariaLabel="Filter by category"
             triggerClassName="max-[620px]:w-full max-[620px]:justify-between"
           />
+          {/* Allocation needs every part the branch holds, so the stock-level
+              filter only appears on the working ledger. */}
+          {!isAllocatingForJob && !isAllocationRoute && (
+            <FilterMenu
+              label={stockLevelFilter}
+              options={["All stock", "Low stock", "In stock"]}
+              value={stockLevelFilter}
+              onSelect={setStockLevelFilter}
+              ariaLabel="Filter by stock level"
+              triggerClassName="max-[620px]:col-span-2 max-[620px]:w-full max-[620px]:justify-between"
+            />
+          )}
         </div>
       </header>
   
@@ -210,8 +224,12 @@ export default function StockLedgerTab({
             "Inventory could not be loaded."
           ) : (
             <>
-              No inventory items found for{" "}
-              <strong>{selectedBranch}</strong> and{" "}
+              {stockLevelFilter === "Low stock"
+                ? "No low-stock items"
+                : stockLevelFilter === "In stock"
+                  ? "No in-stock items"
+                  : "No inventory items found"}{" "}
+              for <strong>{selectedBranch}</strong> and{" "}
               <strong>{selectedCategory}</strong>.
             </>
           )}

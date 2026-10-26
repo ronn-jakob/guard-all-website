@@ -445,7 +445,50 @@ export async function handleCreateOrUpdateInventoryItem({ body, session, db, act
     if (existingStock) return response({ error: "This item already has a stock record for that branch." }, 409);
   }
 
-  const { error: partUpdateError } = await db.from("parts").update(partValues).eq("part_id", partId);
+  // Moving a part to another category renumbers a generated code so its prefix
+  // keeps matching. Hand-typed codes, and parts whose code no longer carries
+  // their category prefix, are left exactly as they are.
+  let previousSku = "";
+  if (categoryId && categoryRecord) {
+    const { data: existingPart, error: existingPartError } = await db
+      .from("parts")
+      .select("sku, category_id")
+      .eq("part_id", partId)
+      .maybeSingle();
+    if (existingPartError) throw existingPartError;
+    if (existingPart && existingPart.category_id && existingPart.category_id !== categoryId) {
+      const { data: previousCategory, error: previousCategoryError } = await db
+        .from("part_categories")
+        .select("code_prefix")
+        .eq("category_id", existingPart.category_id)
+        .maybeSingle();
+      if (previousCategoryError) throw previousCategoryError;
+      const previousPrefix = String(previousCategory?.code_prefix ?? "");
+      const carriesPreviousPrefix = Boolean(previousPrefix) &&
+        new RegExp(`^${previousPrefix}-\\d+$`, "i").test(String(existingPart.sku ?? ""));
+      if (carriesPreviousPrefix) {
+        previousSku = String(existingPart.sku);
+        const { data: skuRows, error: skuError } = await db.from("parts").select("sku");
+        if (skuError) throw skuError;
+        partValues.sku = nextSkuFor((skuRows ?? []).map((row: any) => row.sku), categoryRecord.code_prefix);
+      }
+    }
+  }
+
+  // A regenerated code can lose the same uniqueness race as a create, so
+  // recompute from the live table and retry instead of failing the request.
+  let partUpdateError: any = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    const { error: updateError } = await db.from("parts").update(partValues).eq("part_id", partId);
+    partUpdateError = updateError;
+    if (!partUpdateError) break;
+    if (partUpdateError.code !== "23505" || !previousSku || !categoryRecord) break;
+    const { data: skuRows, error: skuError } = await db.from("parts").select("sku");
+    if (skuError) throw skuError;
+    const regenerated = nextSkuFor((skuRows ?? []).map((row: any) => row.sku), categoryRecord.code_prefix);
+    if (regenerated === partValues.sku) break;
+    partValues.sku = regenerated;
+  }
   if (partUpdateError) {
     if (partUpdateError.code === "23505") return response({ error: "An item with this code already exists." }, 409);
     throw partUpdateError;
@@ -453,6 +496,13 @@ export async function handleCreateOrUpdateInventoryItem({ body, session, db, act
   if (stock.branch !== branch) {
     const { error: branchUpdateError } = await db.from("stock").update({ branch }).eq("stock_id", stockId);
     if (branchUpdateError) throw branchUpdateError;
+  }
+  if (previousSku && previousSku !== partValues.sku) {
+    return response({
+      message: `Inventory item updated. Code changed from ${previousSku} to ${partValues.sku}.`,
+      sku: partValues.sku,
+      previousSku,
+    });
   }
   return response({ message: "Inventory item updated." });
 }

@@ -7,6 +7,7 @@ import {
   nextSku,
   normaliseCategoryName,
   normalisePrefix,
+  skuMatchesPrefix,
   suggestPrefix,
 } from "./inventoryCategories.js";
 
@@ -85,6 +86,25 @@ describe("nextSku", () => {
 
   it("returns an empty string without a prefix", () => {
     expect(nextSku(["DMP-001"], "")).toBe("");
+  });
+});
+
+describe("skuMatchesPrefix", () => {
+  it("recognises a code generated from the prefix", () => {
+    expect(skuMatchesPrefix("DMP-001", "DMP")).toBe(true);
+    expect(skuMatchesPrefix("DMP-1000", "dmp")).toBe(true);
+  });
+
+  it("ignores surrounding whitespace", () => {
+    expect(skuMatchesPrefix(" dmp-014 ", "DMP")).toBe(true);
+  });
+
+  it("rejects foreign, hand-typed, and empty values", () => {
+    expect(skuMatchesPrefix("CCTV-004", "DMP")).toBe(false);
+    expect(skuMatchesPrefix("CUSTOM-1", "DMP")).toBe(false);
+    expect(skuMatchesPrefix("DMP-", "DMP")).toBe(false);
+    expect(skuMatchesPrefix("DMP-001", "")).toBe(false);
+    expect(skuMatchesPrefix(null, "DMP")).toBe(false);
   });
 });
 

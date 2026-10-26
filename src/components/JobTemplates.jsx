@@ -236,15 +236,16 @@ function JobTemplates() {
       setSaveError("Pick a part for every line marked as a Part.");
       return;
     }
-    // Part quantities feed integer columns downstream (job_parts, stock_movements),
-    // so they must stay whole numbers. Fractional quantities stay valid for labour.
-    const badPartQuantity = usableItems.find(
+    // Quantities are whole numbers on every line: part lines feed integer stock
+    // columns downstream (job_parts, stock_movements), and labour, transport, and
+    // other lines are billed per unit, so fractions are rejected rather than
+    // silently rounded by the numeric(10,2) columns.
+    const badQuantity = usableItems.find(
       (item) =>
-        item.lineType === "parts" &&
-        (!Number.isInteger(Number(item.quantity)) || Number(item.quantity) < 1),
+        !Number.isInteger(Number(item.quantity)) || Number(item.quantity) < 1,
     );
-    if (badPartQuantity) {
-      setSaveError("Part quantities must be whole numbers, 1 or more.");
+    if (badQuantity) {
+      setSaveError("Quantities must be whole numbers, 1 or more.");
       return;
     }
 
@@ -619,8 +620,8 @@ function JobTemplates() {
                             Qty
                             <input
                               type="number"
-                              min={item.lineType === "parts" ? "1" : "0.01"}
-                              step={item.lineType === "parts" ? "1" : "0.01"}
+                              min="1"
+                              step="1"
                               className={`${fieldClass} mt-1 h-9 text-[12px]`}
                               value={item.quantity}
                               onChange={(event) =>

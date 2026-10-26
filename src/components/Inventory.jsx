@@ -100,6 +100,9 @@ function Inventory() {
   const [selectedBranch, setSelectedBranch] = useState(isAdmin ? "All branches" : accountBranchLabel);
   const branchBeforeJobAllocation = useRef("All branches");
   const [selectedCategory, setSelectedCategory] = useState("All categories");
+  // Low stock is the same rule as the status pill and the "Below reorder point"
+  // card: quantity on hand at or under the part's reorder threshold.
+  const [stockLevelFilter, setStockLevelFilter] = useState("All stock");
   const [searchTerm, setSearchTerm] = useState("");
   // Archived parts keep their history but leave the working catalogue.
   const [inventoryStatus, setInventoryStatus] = useState("active");
@@ -389,7 +392,12 @@ function Inventory() {
     const query = searchTerm.trim().toLowerCase();
     const matchesSearch =
       !query || `${item[1]} ${item[2]}`.toLowerCase().includes(query);
-    return matchesBranch && matchesCategory && matchesSearch;
+    const matchesStockLevel =
+      isAllocatingForJob ||
+      isAllocationRoute ||
+      stockLevelFilter === "All stock" ||
+      (stockLevelFilter === "Low stock" ? Boolean(item[11]) : !item[11]);
+    return matchesBranch && matchesCategory && matchesSearch && matchesStockLevel;
   });
   const availableQuantities = new Map(
     recordsToDisplay.map((item) => [item[12], item[16] ?? Number(item[3])]),
@@ -613,13 +621,16 @@ function Inventory() {
 
     try {
       if (isEditItem) {
-        await updateInventoryItem({
+        const result = await updateInventoryItem({
           stockId: selectedInventoryItem[12],
           partId: selectedInventoryItem[13],
           item,
         });
+        // Only a renumber deserves a banner; a plain edit needs no notice.
+        setPartNotice(result?.previousSku ? result.message : "");
       } else {
         await createInventoryItem({ item });
+        setPartNotice("");
       }
       setInventoryRecords(await fetchInventoryRecords());
       await loadCategories();
@@ -776,6 +787,8 @@ function Inventory() {
                 setSelectedCategory={setSelectedCategory}
                 setSelectedItemCode={setSelectedItemCode}
                 setStockAdjustment={setStockAdjustment}
+                setStockLevelFilter={setStockLevelFilter}
+                stockLevelFilter={stockLevelFilter}
               />
             )}
 
@@ -853,6 +866,7 @@ function Inventory() {
             setNewItemUnitPrice={setNewItemUnitPrice}
             newItemTotalCost={newItemTotalCost}
             activeCategories={activeCategories}
+            categories={categories}
             categoryNameById={categoryNameById}
             onNewCategory={openNewCategory}
             isLoadingCategories={isLoadingCategories}

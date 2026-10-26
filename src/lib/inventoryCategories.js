@@ -83,3 +83,12 @@ export function isPrefixTaken(prefix, categories = [], excludeId = "") {
       normalisePrefix(category.prefix) === target,
   );
 }
+
+// True when a code still carries the category prefix it was generated from
+// ("DMC-001" for DMC). Codes typed by hand, or codes from another prefix, are
+// deliberately left alone when a part moves category.
+export function skuMatchesPrefix(sku, prefix) {
+  const clean = normalisePrefix(prefix);
+  if (!clean) return false;
+  return new RegExp(`^${clean}-\\d+$`, "i").test(String(sku ?? "").trim());
+}

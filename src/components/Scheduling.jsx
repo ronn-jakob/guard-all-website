@@ -609,7 +609,10 @@ function Scheduling() {
                           );
                         }
 
-                        const jobsOnDate = schedule.filter(
+                        // Same visibility rule as the month counter and the
+                        // day panel: a paid job leaves the board, and its
+                        // badge, unless the Paid jobs toggle is on.
+                        const jobsOnDate = visibleSchedule.filter(
                           (job) =>
                             getDateKey(scheduledJobDates[job[3]]) ===
                             getDateKey(date),
