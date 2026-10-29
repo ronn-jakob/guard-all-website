@@ -1,0 +1,51 @@
+/* Printable reports.
+ *
+ * The report route is a standalone page (no Sidebar/TopBar), so the print rules
+ * only need to strip the screen chrome, lock the paper size, and keep tables
+ * from breaking awkwardly across pages.
+ */
+
+@page {
+  size: A4 portrait;
+  margin: 14mm 12mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  /* The on-screen card is a centred A4-looking sheet; on paper it is the page. */
+  .print-page {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  /* Repeat table headers on every page and never split a row. */
+  thead {
+    display: table-header-group;
+  }
+  tfoot {
+    display: table-footer-group;
+  }
+  tr,
+  td,
+  th {
+    break-inside: avoid;
+  }
+
+  .page-break {
+    break-before: page;
+  }
+
+  /* Keep the letterhead rule, status badges, and shaded totals intact. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

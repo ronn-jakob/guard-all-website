@@ -12,6 +12,10 @@ import {
 } from "../lib/api/scheduling.js";
 import { listJobTemplates } from "../lib/api/templates.js";
 import { dateParamKey } from "../lib/dates.js";
+import {
+  bookingLabel,
+  unavailableTechnicianNames,
+} from "../lib/scheduleAvailability.js";
 
 const fieldClass =
   "mt-1.5 h-11 w-full rounded-[6px] border border-[#d6dee6] bg-white px-3 text-[13px] text-[#273746] outline-none transition focus:border-[#14519f] focus:ring-2 focus:ring-[#14519f]/15";
@@ -127,6 +131,8 @@ function JobFormPage() {
     let alive = true;
     const payload = {};
     if (date) payload.date = date;
+    if (startTime) payload.startTime = startTime;
+    if (endTime) payload.endTime = endTime;
     if (order) payload.excludeOrder = order;
     listTechnicians(payload)
       .then(({ technicians: incoming }) => {
@@ -138,7 +144,7 @@ function JobFormPage() {
     return () => {
       alive = false;
     };
-  }, [date, order]);
+  }, [date, startTime, endTime, order]);
 
   useEffect(() => {
     let alive = true;
@@ -197,6 +203,10 @@ function JobFormPage() {
     if (!query) return true;
     return technician.name.toLowerCase().includes(query);
   });
+  const blockedTechnicianNames = unavailableTechnicianNames(
+    technicians,
+    selectedTechnicians,
+  );
 
   const selectedTechnicianNames = selectedTechnicians
     .map((id) => technicians.find((technician) => technician.id === id)?.name)
@@ -243,6 +253,20 @@ function JobFormPage() {
     }
     if (!endTime || !startTime || endTime <= startTime) {
       setSaveError("The end time must be after the start time.");
+      return;
+    }
+    const blockedTechnician = technicians.find(
+      (technician) =>
+        selectedTechnicians.includes(technician.id) &&
+        technician.available === false,
+    );
+    if (blockedTechnician) {
+      const conflict = blockedTechnician.conflicts?.[0];
+      setSaveError(
+        `${blockedTechnician.name} is already booked${
+          conflict ? ` ${bookingLabel(conflict)}` : ""
+        }. Choose another technician or time.`,
+      );
       return;
     }
     if (clientMode === "existing" && !clientId && !isEdit) {
@@ -714,7 +738,8 @@ function JobFormPage() {
                       {isEdit ? "3. Technicians" : "4. Technicians"}
                     </h2>
                     <p className="m-0 mt-1 text-[12px] text-[#8b949c]">
-                      Only technicians free on {date || "the chosen date"} are listed.
+                      Technicians booked at an overlapping time are marked
+                      busy. Back-to-back jobs are allowed.
                     </p>
                   </div>
                   <label className="flex h-9 min-w-[200px] items-center gap-2 rounded-[6px] border border-[#d9dfe4] bg-[#f8f9fa] px-3 text-[11px] text-[#174f9a] max-[620px]:w-full">
@@ -732,56 +757,109 @@ function JobFormPage() {
 
                 {selectedTechnicianNames.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {selectedTechnicians.map((id, index) => (
-                      <span
-                        key={id}
-                        className="inline-flex items-center gap-1 rounded-full bg-[#e6effb] px-2.5 py-1 text-[11px] font-semibold text-[#17519a]"
-                      >
-                        {selectedTechnicianNames[index] ?? "Technician"}
-                        <button
-                          type="button"
-                          onClick={() => toggleTechnician(id)}
-                          aria-label="Remove technician"
-                          className="border-0 bg-transparent p-0 text-[13px] leading-none text-[#5b7ba6] hover:text-[#b64132]"
+                    {selectedTechnicians.map((id, index) => {
+                      const technician = technicians.find(
+                        (entry) => entry.id === id,
+                      );
+                      const isBusy = technician?.available === false;
+                      return (
+                        <span
+                          key={id}
+                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                            isBusy
+                              ? "bg-[#fff3f1] text-[#b4552f]"
+                              : "bg-[#e6effb] text-[#17519a]"
+                          }`}
                         >
-                          ×
-                        </button>
-                      </span>
-                    ))}
+                          {selectedTechnicianNames[index] ?? "Technician"}
+                          {isBusy ? " · busy" : ""}
+                          <button
+                            type="button"
+                            onClick={() => toggleTechnician(id)}
+                            aria-label="Remove technician"
+                            className="border-0 bg-transparent p-0 text-[13px] leading-none text-[#5b7ba6] hover:text-[#b64132]"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
 
                 <div className="mt-3 max-h-56 divide-y divide-[#eef2f6] overflow-y-auto rounded-[6px] border border-[#e1e6eb]">
                   {visibleTechnicians.length === 0 ? (
                     <p className="m-0 px-3 py-4 text-center text-[12px] text-[#8b949c]">
-                      No available technicians match.
+                      No technicians match.
                     </p>
                   ) : (
-                    visibleTechnicians.map((technician) => (
-                      <label
-                        key={technician.id}
-                        className="flex cursor-pointer items-center gap-2 px-3 py-2 text-[13px] text-[#3a434d] hover:bg-[#f7faff]"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={selectedTechnicians.includes(technician.id)}
-                          onChange={() => toggleTechnician(technician.id)}
-                          className="h-4 w-4 rounded border-gray-300 text-[#1250a0] focus:ring-[#1250a0]"
-                        />
-                        <span className="min-w-0 flex-1 truncate">
-                          {technician.name}
-                        </span>
-                        <span className="shrink-0 text-[11px] text-[#8b949c]">
-                          {technician.branch
-                            ? technician.branch.replace(/^./, (letter) =>
-                                letter.toUpperCase(),
-                              )
-                            : ""}
-                        </span>
-                      </label>
-                    ))
+                    visibleTechnicians.map((technician) => {
+                      const isSelected = selectedTechnicians.includes(
+                        technician.id,
+                      );
+                      const isBusy = technician.available === false;
+                      const busyWindows = (technician.conflicts ?? [])
+                        .map((booking) => bookingLabel(booking))
+                        .filter(Boolean)
+                        .join(", ");
+                      const busyJob = technician.conflicts?.[0]?.jobNumber;
+                      return (
+                        <label
+                          key={technician.id}
+                          className={`flex items-center gap-2 px-3 py-2 text-[13px] text-[#3a434d] hover:bg-[#f7faff] ${
+                            isBusy && !isSelected
+                              ? "cursor-not-allowed opacity-70"
+                              : "cursor-pointer"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            disabled={isBusy && !isSelected}
+                            onChange={() => toggleTechnician(technician.id)}
+                            className="h-4 w-4 rounded border-gray-300 text-[#1250a0] focus:ring-[#1250a0]"
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate">
+                              {technician.name}
+                            </span>
+                            {isBusy && (
+                              <span className="block truncate text-[10px] font-medium text-[#b4552f]">
+                                Busy {busyWindows}
+                                {busyJob ? ` · ${busyJob}` : ""}
+                              </span>
+                            )}
+                            {!isBusy &&
+                              (technician.bookingsToday ?? []).length > 0 && (
+                                <span className="block truncate text-[10px] text-[#8b949c]">
+                                  Also booked{" "}
+                                  {(technician.bookingsToday ?? [])
+                                    .map((booking) => bookingLabel(booking))
+                                    .filter(Boolean)
+                                    .join(", ")}
+                                </span>
+                              )}
+                          </span>
+                          <span className="shrink-0 text-[11px] text-[#8b949c]">
+                            {technician.branch
+                              ? technician.branch.replace(/^./, (letter) =>
+                                  letter.toUpperCase(),
+                                )
+                              : ""}
+                          </span>
+                        </label>
+                      );
+                    })
                   )}
                 </div>
+
+                {blockedTechnicianNames.length > 0 && (
+                  <p className="m-0 mt-2 text-[11px] font-semibold text-[#b4552f]">
+                    Cannot save with {blockedTechnicianNames.join(", ")} — their
+                    time overlaps another job. Pick a different window or
+                    technician.
+                  </p>
+                )}
               </section>
             </div>
 

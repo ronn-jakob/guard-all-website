@@ -526,3 +526,66 @@ export async function handleListParts({ db }: { db: any }) {
     })),
   });
 }
+
+// Stock movements for a printable period report. Dates arrive as ISO
+// timestamps so the browser's local day boundaries decide which day a movement
+// belongs to; a capped range is flagged instead of silently truncated.
+export async function handleListStockMovements({ body, session, db }: { body: any; session: any; db: any }) {
+  const from = String(body.from ?? "").trim();
+  const to = String(body.to ?? "").trim();
+  const fromTime = Date.parse(from);
+  const toTime = Date.parse(to);
+  if (!from || !to || Number.isNaN(fromTime) || Number.isNaN(toTime) || fromTime >= toTime) {
+    return response({ error: "Choose a valid movement date range." }, 400);
+  }
+
+  const requestedLimit = Number(body.limit);
+  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+    ? Math.min(Math.floor(requestedLimit), 5000)
+    : 2000;
+
+  let movementQuery = db
+    .from("stock_movements")
+    .select(`
+      movement_id, part_id, direction, quantity, reason, created_at, branch,
+      parts!stock_movements_part_id_fkey!inner(sku, name, category, unit_of_measure),
+      users!stock_movements_performed_by_fkey(first_name, last_name),
+      jobs!stock_movements_related_job_id_fkey(job_number)
+    `)
+    .gte("created_at", new Date(fromTime).toISOString())
+    .lt("created_at", new Date(toTime).toISOString())
+    .order("created_at", { ascending: true })
+    .limit(limit + 1);
+
+  const movementBranch = branchScope(session);
+  if (movementBranch !== null) movementQuery = movementQuery.eq("branch", movementBranch);
+
+  const { data, error } = await movementQuery;
+  if (error) throw error;
+
+  const rows = data ?? [];
+  const truncated = rows.length > limit;
+  return response({
+    truncated,
+    movements: rows.slice(0, limit).map((movement: any) => {
+      const part = Array.isArray(movement.parts) ? movement.parts[0] : movement.parts;
+      const actor = Array.isArray(movement.users) ? movement.users[0] : movement.users;
+      const job = Array.isArray(movement.jobs) ? movement.jobs[0] : movement.jobs;
+      return {
+        id: movement.movement_id,
+        partId: movement.part_id,
+        date: movement.created_at,
+        sku: part?.sku ?? "",
+        name: part?.name ?? "Part",
+        category: part?.category ?? "Uncategorized",
+        unitOfMeasure: part?.unit_of_measure ?? "",
+        branch: String(movement.branch ?? "").replace(/^./, (letter: string) => letter.toUpperCase()),
+        direction: movement.direction,
+        quantity: Number(movement.quantity) || 0,
+        reason: movement.reason,
+        jobNumber: job?.job_number ?? "",
+        performedBy: actor ? [actor.first_name, actor.last_name].filter(Boolean).join(" ") : "",
+      };
+    }),
+  });
+}

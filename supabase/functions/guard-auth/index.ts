@@ -62,11 +62,11 @@ import {
 import { handleLogin, handleRequestPasswordReset } from "./handlers/session.ts";
 import { handleListAuditLog } from "./handlers/audit.ts";
 import { handleCreateInvoice, handleListInvoiceCandidates, handleListInvoices, handleRecordPayment } from "./handlers/billing.ts";
-import { handleAdjustInventoryStock, handleCreateOrUpdateInventoryItem, handleDeleteInventoryPart, handleListInventory, handleListPartCategories, handleListParts, handleRestoreInventoryPart, handleSavePartCategory } from "./handlers/inventory.ts";
+import { handleAdjustInventoryStock, handleCreateOrUpdateInventoryItem, handleDeleteInventoryPart, handleListInventory, handleListPartCategories, handleListParts, handleListStockMovements, handleRestoreInventoryPart, handleSavePartCategory } from "./handlers/inventory.ts";
 import { handleDashboardSummary } from "./handlers/dashboard.ts";
 const schedulingActions = new Set(["list-technicians", "list-schedules", "create-schedule", "get-schedule", "update-schedule", "confirm-job-assignment", "create-job-from-template", "list-clients", "delete-job"]);
 const fieldReportActions = new Set(["list-field-report-jobs", "list-field-reports", "submit-field-report", "resubmit-field-report", "create-report-upload", "discard-report-upload"]);
-const inventoryActions = new Set(["list-inventory", "create-inventory-item", "adjust-inventory-stock", "update-inventory-item", "delete-inventory-part", "restore-inventory-part", "list-part-categories", "save-part-category"]);
+const inventoryActions = new Set(["list-inventory", "create-inventory-item", "adjust-inventory-stock", "update-inventory-item", "delete-inventory-part", "restore-inventory-part", "list-part-categories", "save-part-category", "list-stock-movements"]);
 const jobAllocationActions = new Set(["list-pending-job-requests", "list-job-allocation-stock", "allocate-job-stock", "list-job-allocation-history"]);
 // Invoicing and payments belong to the sales_billing module (Billing Staff, Admin).
 const billingActions = new Set(["list-invoices", "list-invoice-candidates", "create-invoice", "record-payment", "delete-job-template"]);
@@ -158,6 +158,8 @@ Deno.serve(async (request: Request) => {
     if (action === "list-parts") return handleListParts({ db });
 
     if (action === "list-inventory") return handleListInventory({ body, session, db });
+
+    if (action === "list-stock-movements") return handleListStockMovements({ body, session, db });
 
     if (action === "list-pending-job-requests") return handleListPendingJobRequests({ session });
 

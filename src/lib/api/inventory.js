@@ -9,6 +9,7 @@ export const INVENTORY_ACTIONS = Object.freeze({
   adjustStock: "adjust-inventory-stock",
   deletePart: "delete-inventory-part",
   restorePart: "restore-inventory-part",
+  listMovements: "list-stock-movements",
   createItem: "create-inventory-item",
   updateItem: "update-inventory-item",
   allocationStock: "list-job-allocation-stock",
@@ -39,6 +40,10 @@ export function deleteInventoryPart(payload) {
 
 export function restoreInventoryPart(payload) {
   return callAuthFunction(INVENTORY_ACTIONS.restorePart, payload);
+}
+
+export function listStockMovements(payload = {}) {
+  return callAuthFunction(INVENTORY_ACTIONS.listMovements, payload);
 }
 
 export function createInventoryItem(payload) {

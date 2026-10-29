@@ -12,6 +12,8 @@ import Account from "./components/Account.jsx";
 import AuditLog from "./components/AuditLog.jsx";
 import Settings from "./components/Settings.jsx";
 import ForgotPassword from "./components/ForgotPassword.jsx";
+import PrintReportPage from "./features/printing/PrintReportPage.jsx";
+import PrintReportsHub from "./features/printing/PrintReportsHub.jsx";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { canAccessModule, getSession } from "./lib/auth.js";
 
@@ -54,6 +56,8 @@ function App() {
       <Route path="/account/new" element={<ProtectedRoute module="admin"><Account /></ProtectedRoute>} />
       <Route path="/audit" element={<ProtectedRoute module="admin"><AuditLog /></ProtectedRoute>} />
       <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+      <Route path="/print" element={<ProtectedRoute><PrintReportsHub /></ProtectedRoute>} />
+      <Route path="/print/:module" element={<PrintReportPage />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
     </Routes>
   );

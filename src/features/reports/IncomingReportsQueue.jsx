@@ -1,3 +1,4 @@
+import { useState } from "react";
 import ReportStatusPill from "./ReportStatusPill.jsx";
 import { queueFilters } from "./reportsQueue.js";
 
@@ -17,6 +18,8 @@ export default function IncomingReportsQueue({
   onApplyFilter,
   onSelectReport,
 }) {
+  const [isQueueOpen, setIsQueueOpen] = useState(true);
+
   return (
     <section className="overflow-hidden rounded-[10px] border border-[#dfe6ec] bg-white shadow-[0_3px_8px_rgb(31_59_82_/_12%)]">
       <header className="flex items-start justify-between border-b border-[#e1e6eb] px-5 py-4">
@@ -32,7 +35,20 @@ export default function IncomingReportsQueue({
               : "No reports or reserved jobs in current queue"}
           </p>
         </div>
-        <div className="relative" ref={filterRef}>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            aria-expanded={isQueueOpen}
+            aria-controls="incoming-reports-list"
+            aria-label={isQueueOpen ? "Collapse incoming reports" : "Expand incoming reports"}
+            onClick={() => setIsQueueOpen((isOpen) => !isOpen)}
+            className="grid h-8 w-8 place-items-center border-0 bg-transparent text-[#7b8792] hover:text-[#174f9a]"
+          >
+            <span className="material-symbols-outlined text-[21px]">
+              {isQueueOpen ? "expand_less" : "expand_more"}
+            </span>
+          </button>
+          <div className="relative" ref={filterRef}>
           <button
             className={`border-0 bg-transparent p-0 ${
               queueFilter === "all" ? "text-[#7b8792]" : "text-[#174f9a]"
@@ -70,9 +86,11 @@ export default function IncomingReportsQueue({
               ))}
             </div>
           )}
+          </div>
         </div>
       </header>
-      <div className="max-h-[580px] overflow-y-auto">
+      {isQueueOpen && (
+        <div id="incoming-reports-list" className="max-h-[640px] overflow-y-auto">
         {reports.length === 0 ? (
           <div className="px-5 py-8 text-center text-[13px] text-[#7d8994]">
             No reports or reserved jobs are waiting in the queue.
@@ -135,7 +153,8 @@ export default function IncomingReportsQueue({
             ),
           )
         )}
-      </div>
+        </div>
+      )}
     </section>
   );
 }

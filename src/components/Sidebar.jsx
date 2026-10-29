@@ -10,6 +10,7 @@ const primaryNavigation = [
   ["inventory_2", "Inventory", "/inventory", "inventory"],
   ["assignment", "Field Reports", "/reports", "field_reporting"],
   ["sell", "Sales & Billing", "/billing", "sales_billing"],
+  ["print", "Print reports", "/print", null],
 ];
 
 function Sidebar() {

@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { periodLabel } from "../../lib/billing.js";
 
 const periodModes = [
@@ -20,6 +21,7 @@ export default function BillingPeriodFilter({
   onChangeMonth,
   onChangeYear,
   onToggleBreakdown,
+  printHref = "",
 }) {
   return (
     <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -81,6 +83,16 @@ export default function BillingPeriodFilter({
       >
         {isBreakdownOpen ? "Hide breakdown" : "Show breakdown"}
       </button>
+
+      {printHref && (
+        <Link
+          to={printHref}
+          className="flex items-center gap-1 rounded-[6px] border border-[#1250a0] bg-white px-3 py-1.5 text-[10px] font-bold text-[#1250a0] no-underline hover:bg-[#f3f8ff]"
+        >
+          <span className="material-symbols-outlined text-[14px]">print</span>
+          Print report
+        </Link>
+      )}
     </div>
   );
 }

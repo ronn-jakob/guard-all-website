@@ -62,6 +62,7 @@ import {
   listJobAllocationStock,
   listPartCategories,
   listPendingJobRequests,
+  listStockMovements,
   restoreInventoryPart,
   savePartCategory,
   updateInventoryItem,
@@ -442,6 +443,15 @@ describe("inventory api", () => {
       pendingRequests: "list-pending-job-requests",
       allocationHistory: "list-job-allocation-history",
       allocate: "allocate-job-stock",
+      listMovements: "list-stock-movements",
+    });
+  });
+
+  it("forwards the stock movement range", async () => {
+    await listStockMovements({ from: "2026-10-01T00:00:00.000Z", to: "2026-11-01T00:00:00.000Z" });
+    expect(callAuthFunction).toHaveBeenLastCalledWith("list-stock-movements", {
+      from: "2026-10-01T00:00:00.000Z",
+      to: "2026-11-01T00:00:00.000Z",
     });
   });
 

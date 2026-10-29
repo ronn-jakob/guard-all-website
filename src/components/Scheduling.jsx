@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { getSession } from "../lib/auth.js";
+import { resolvePeriod } from "../lib/reportPeriods.js";
 import {
   confirmJobAssignment,
   deleteJob,
@@ -199,6 +200,13 @@ function Scheduling() {
       ? selectedCalendarKey
       : (dayFilter ??
         (selectedDayInWeek ? selectedCalendarKey : getDateKey(getToday())));
+
+  // Printing follows what the scheduler is looking at: the calendar's selected
+  // day, or the week the list is showing.
+  const printPeriod = resolvePeriod(
+    "week",
+    getDateKey(viewMode === "calendar" ? selectedCalendarDate : weekStart),
+  );
 
   const defaultVisibleJob =
     viewMode === "calendar" ? selectedDayJobs[0] : listJobs[0];
@@ -428,7 +436,16 @@ function Scheduling() {
                     </div>
                   )}
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <Link
+                    to={`/print/scheduling?mode=week&value=${printPeriod.value}`}
+                    className="flex items-center gap-1 rounded-[6px] border border-[#1250a0] bg-white px-3 py-2 text-[10px] font-bold text-[#1250a0] no-underline hover:bg-[#f3f8ff] max-[1024px]:px-2 max-[1024px]:py-1.5 max-[1024px]:text-[9px]"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">
+                      print
+                    </span>
+                    Print report
+                  </Link>
                   <button
                     type="button"
                     aria-pressed={showClosed}

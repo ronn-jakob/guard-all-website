@@ -557,8 +557,11 @@ export async function listFieldReportJobs(session: Record<string, unknown>) {
 
       // A teammate's report keeps the job visible even after the parts have been
       // reconciled, because the collection is not finished until everyone files.
+      // Jobs with no quotation part lines are classified not_required at
+      // confirmation and still need a report even though nothing was reserved.
       return (
         allocatedJobIds.has(job.job_id) ||
+        job.parts_status === "not_required" ||
         job.job_type === "maintenance" ||
         (job.job_parts ?? []).some((part: any) => part.status === "reserved") ||
         jobReports.length > 0

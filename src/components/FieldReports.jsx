@@ -101,6 +101,7 @@ function FieldReports() {
   const [technicianFilter, setTechnicianFilter] = useState("");
   const [technicianOptions, setTechnicianOptions] = useState([]);
   const [submittedReports, setSubmittedReports] = useState([]);
+  const [isSubmittedOpen, setIsSubmittedOpen] = useState(true);
   const [isLoadingSubmittedReports, setIsLoadingSubmittedReports] =
     useState(true);
   const [submittedReportsError, setSubmittedReportsError] = useState("");
@@ -521,19 +522,35 @@ function FieldReports() {
           </section>
 
           <section className={`${card} mb-3`}>
-            <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
-              <div>
-                <p className="m-0 text-[13px] font-bold text-[#68798a]">
-                  SUBMITTED REPORTS
-                </p>
-                <p className="mb-0 mt-1 text-[13px] text-[#8290a0]">
-                  {canFilterByTechnician
-                    ? technicianFilter
-                      ? "Reports filed by the selected technician."
-                      : "Every report filed so far."
-                    : "Reports you have already submitted."}
-                </p>
-              </div>
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+              <button
+                type="button"
+                aria-expanded={isSubmittedOpen}
+                aria-controls="submitted-reports-list"
+                onClick={() => setIsSubmittedOpen((isOpen) => !isOpen)}
+                className="flex min-w-0 items-start gap-2 border-0 bg-transparent p-0 text-left"
+              >
+                <span className="min-w-0">
+                  <span className="m-0 flex items-center gap-1 text-[13px] font-bold text-[#68798a]">
+                    SUBMITTED REPORTS
+                    <span className="material-symbols-outlined text-[18px] text-[#8290a0]">
+                      {isSubmittedOpen ? "expand_less" : "expand_more"}
+                    </span>
+                  </span>
+                  <span className="mt-1 block text-[13px] text-[#8290a0]">
+                    {canFilterByTechnician
+                      ? technicianFilter
+                        ? "Reports filed by the selected technician"
+                        : "Every report filed so far"
+                      : "Reports you have already submitted"}
+                    {submittedReports.length > 0
+                      ? ` · ${submittedReports.length} ${
+                          submittedReports.length === 1 ? "report" : "reports"
+                        }`
+                      : ""}
+                  </span>
+                </span>
+              </button>
               {canFilterByTechnician && (
                 <label className="flex items-center gap-2 text-[12px] font-semibold text-[#45515c] max-[620px]:w-full">
                   Technician
@@ -562,50 +579,57 @@ function FieldReports() {
               </p>
             )}
 
-            {isLoadingSubmittedReports ? (
-              <p className="mb-0 text-[13px] text-[#778593]">
-                Loading submitted reports...
-              </p>
-            ) : submittedReports.length === 0 ? (
-              <p className="mb-0 text-[13px] text-[#778593]">
-                {technicianFilter
-                  ? "This technician has not submitted any reports yet."
-                  : "No reports have been submitted yet."}
-              </p>
-            ) : (
-              <div className="divide-y divide-[#e5ebf1]">
-                {submittedReports.map((report) => (
-                  <button
-                    key={report.id}
-                    type="button"
-                    onClick={() => setOpenReport(report)}
-                    className="flex w-full items-center gap-3 py-3 text-left transition-colors hover:bg-[#f7faff]"
-                  >
-                    <span className="min-w-0 flex-1">
-                      <strong className="block truncate text-[14px] text-[#174f9a]">
-                        {report.client}
-                      </strong>
-                      <span className="mt-0.5 block truncate text-[12px] text-[#778593]">
-                        {report.id} · {report.service} · {report.time}
-                      </span>
-                      {canFilterByTechnician && !technicianFilter && (
-                        <span className="mt-0.5 block truncate text-[11px] text-[#8b99aa]">
-                          {report.technician}
+            {isSubmittedOpen && (
+              <div
+                id="submitted-reports-list"
+                className="max-h-[380px] overflow-y-auto pr-1 [scrollbar-width:thin]"
+              >
+                {isLoadingSubmittedReports ? (
+                  <p className="mb-0 text-[13px] text-[#778593]">
+                    Loading submitted reports...
+                  </p>
+                ) : submittedReports.length === 0 ? (
+                  <p className="mb-0 text-[13px] text-[#778593]">
+                    {technicianFilter
+                      ? "This technician has not submitted any reports yet."
+                      : "No reports have been submitted yet."}
+                  </p>
+                ) : (
+                  <div className="divide-y divide-[#e5ebf1]">
+                    {submittedReports.map((report) => (
+                      <button
+                        key={report.id}
+                        type="button"
+                        onClick={() => setOpenReport(report)}
+                        className="flex min-h-[76px] w-full items-center gap-3 py-3 text-left transition-colors hover:bg-[#f7faff]"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <strong className="block truncate text-[14px] text-[#174f9a]">
+                            {report.client}
+                          </strong>
+                          <span className="mt-0.5 block truncate text-[12px] text-[#778593]">
+                            {report.id} · {report.service} · {report.time}
+                          </span>
+                          {canFilterByTechnician && !technicianFilter && (
+                            <span className="mt-0.5 block truncate text-[11px] text-[#8b99aa]">
+                              {report.technician}
+                            </span>
+                          )}
                         </span>
-                      )}
-                    </span>
-                    <span
-                      className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-bold ${
-                        reportStatusStyles[report.tone] ?? reportStatusStyles.gray
-                      }`}
-                    >
-                      {report.status}
-                    </span>
-                    <span className="material-symbols-outlined shrink-0 text-[20px] text-[#a6afb8]">
-                      chevron_right
-                    </span>
-                  </button>
-                ))}
+                        <span
+                          className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-bold ${
+                            reportStatusStyles[report.tone] ?? reportStatusStyles.gray
+                          }`}
+                        >
+                          {report.status}
+                        </span>
+                        <span className="material-symbols-outlined shrink-0 text-[20px] text-[#a6afb8]">
+                          chevron_right
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </section>

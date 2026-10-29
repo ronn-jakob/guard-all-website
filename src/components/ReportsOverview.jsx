@@ -3,6 +3,7 @@ import TopBar from "./TopBar.jsx";
 import { Link } from "react-router-dom";
 import { useEffect, useRef, useState } from "react";
 import { listFieldReports, reviewFieldReport } from "../lib/api/reports.js";
+import { currentPeriodValue } from "../lib/reportPeriods.js";
 import ReportStatsCards from "../features/reports/ReportStatsCards.jsx";
 import IncomingReportsQueue from "../features/reports/IncomingReportsQueue.jsx";
 import ReportReviewDetail from "../features/reports/ReportReviewDetail.jsx";
@@ -124,13 +125,22 @@ function ReportsOverview() {
                 A concise manager review on what happened on site.
               </p>
             </div>
-            <Link
-              className="inline-flex items-center gap-2 rounded-[6px] bg-[#1250a0] px-4 py-3 text-[14px] font-bold text-white no-underline shadow-[0_2px_4px_rgb(18_80_160_/_25%)] transition-colors hover:bg-[#0d438a] max-[620px]:px-3 max-[620px]:py-2"
-              to="/reports/new"
-            >
-              <span className="material-symbols-outlined text-[19px]">add</span>
-              New Report
-            </Link>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Link
+                className="inline-flex items-center gap-2 rounded-[6px] border border-[#1250a0] bg-white px-4 py-3 text-[14px] font-bold text-[#1250a0] no-underline transition-colors hover:bg-[#f3f8ff] max-[620px]:px-3 max-[620px]:py-2 max-[620px]:text-[12px]"
+                to={`/print/reports?mode=month&value=${currentPeriodValue("month")}`}
+              >
+                <span className="material-symbols-outlined text-[19px]">print</span>
+                Print report
+              </Link>
+              <Link
+                className="inline-flex items-center gap-2 rounded-[6px] bg-[#1250a0] px-4 py-3 text-[14px] font-bold text-white no-underline shadow-[0_2px_4px_rgb(18_80_160_/_25%)] transition-colors hover:bg-[#0d438a] max-[620px]:px-3 max-[620px]:py-2"
+                to="/reports/new"
+              >
+                <span className="material-symbols-outlined text-[19px]">add</span>
+                New Report
+              </Link>
+            </div>
           </header>
 
           <ReportStatsCards reports={reports} />

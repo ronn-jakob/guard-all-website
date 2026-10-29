@@ -11,7 +11,48 @@ export async function ensureTechnicianRecord(user: Record<string, unknown>, db =
   return data.technician_id;
 }
 
-export async function listTechnicians(date: string, excludeOrder = "") {
+const minutesFromTime = (value: unknown) => {
+  const match = /^(\d{2}):(\d{2})$/.exec(String(value ?? "").slice(0, 5));
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return hours * 60 + minutes;
+};
+
+// Half-open windows: a job ending at 10:00 does not block one starting at 10:00.
+const windowsOverlap = (start: number, end: number, otherStart: number, otherEnd: number) =>
+  start < end && otherStart < otherEnd && start < otherEnd && otherStart < end;
+
+const isExclusionViolation = (error: any) =>
+  error?.code === "23P01" || String(error?.message ?? "").includes("no_technician_overlap");
+
+type TechnicianBooking = {
+  jobNumber: string;
+  start: string;
+  end: string;
+  startMinutes: number;
+  endMinutes: number;
+};
+
+// A job that starts before or ends after the requested date blocks that edge of
+// the day, so multi-day work is never silently ignored.
+const bookingFor = (job: any, date: string): TechnicianBooking | null => {
+  const start = minutesFromTime(job?.scheduled_time);
+  const end = minutesFromTime(job?.scheduled_end_time);
+  if (start === null || end === null) return null;
+  const startsBefore = String(job?.scheduled_date ?? "") < date;
+  const endsAfter = String(job?.scheduled_end_date ?? job?.scheduled_date ?? "") > date;
+  return {
+    jobNumber: String(job?.job_number ?? ""),
+    start: startsBefore ? "00:00" : String(job?.scheduled_time ?? "").slice(0, 5),
+    end: endsAfter ? "24:00" : String(job?.scheduled_end_time ?? "").slice(0, 5),
+    startMinutes: startsBefore ? 0 : start,
+    endMinutes: endsAfter ? 24 * 60 : end,
+  };
+};
+
+export async function listTechnicians(date: string, excludeOrder = "", startTime = "", endTime = "") {
   const { data: users, error } = await supabaseAdmin
     .from("users")
     .select("user_id, first_name, last_name, branch, roles!inner(role_name), technicians(technician_id)")
@@ -30,19 +71,121 @@ export async function listTechnicians(date: string, excludeOrder = "") {
   }
 
   if (!date || !allTechnicians.length) return allTechnicians;
+
+  const windowStart = minutesFromTime(startTime);
+  const windowEnd = minutesFromTime(endTime);
+  const hasWindow = windowStart !== null && windowEnd !== null && windowEnd > windowStart;
+
   let bookedQuery = supabaseAdmin
     .from("job_technicians")
-    .select("technician_id, jobs!inner(job_number, scheduled_date, status)")
-    .eq("jobs.scheduled_date", date)
+    .select("technician_id, jobs!inner(job_number, scheduled_date, scheduled_time, scheduled_end_date, scheduled_end_time, status)")
+    .lte("jobs.scheduled_date", date)
+    .gte("jobs.scheduled_end_date", date)
     .neq("jobs.status", "cancelled")
     .eq("is_active", true)
     .in("technician_id", allTechnicians.map((technician) => technician.id));
   if (excludeOrder) bookedQuery = bookedQuery.neq("jobs.job_number", excludeOrder);
   const { data: booked, error: bookedError } = await bookedQuery;
   if (bookedError) throw bookedError;
-  const bookedIds = new Set((booked ?? []).map((assignment: { technician_id: string | number }) => assignment.technician_id));
-  return allTechnicians.filter((technician) => !bookedIds.has(technician.id));
+
+  // Every technician stays selectable; a busy window is reported instead of
+  // hiding the person, so the planner can see the rest of their day.
+  const bookingsByTechnician = new Map<string, TechnicianBooking[]>();
+  for (const assignment of booked ?? []) {
+    const job = Array.isArray(assignment.jobs) ? assignment.jobs[0] : assignment.jobs;
+    const booking = bookingFor(job, date);
+    if (!booking) continue;
+    const list = bookingsByTechnician.get(assignment.technician_id) ?? [];
+    list.push(booking);
+    bookingsByTechnician.set(assignment.technician_id, list);
+  }
+
+  const toPublic = (booking: TechnicianBooking) => ({
+    jobNumber: booking.jobNumber,
+    start: booking.start,
+    end: booking.end,
+  });
+
+  return allTechnicians.map((technician) => {
+    const bookings = bookingsByTechnician.get(technician.id) ?? [];
+    const conflicts = hasWindow
+      ? bookings.filter((booking) => windowsOverlap(windowStart, windowEnd, booking.startMinutes, booking.endMinutes))
+      : bookings;
+    return {
+      ...technician,
+      available: conflicts.length === 0,
+      bookingsToday: bookings.map(toPublic),
+      conflicts: conflicts.map(toPublic),
+    };
+  });
 }
+
+type TechnicianConflict = {
+  technicianId: string;
+  name: string;
+  jobNumber: string;
+  start: string;
+  end: string;
+};
+
+async function findTechnicianConflicts(
+  db: any,
+  {
+    technicianIds,
+    date,
+    startTime,
+    endTime,
+    excludeOrder = "",
+  }: {
+    technicianIds: string[];
+    date: string;
+    startTime: string;
+    endTime: string;
+    excludeOrder?: string;
+  },
+): Promise<TechnicianConflict[]> {
+  const windowStart = minutesFromTime(startTime);
+  const windowEnd = minutesFromTime(endTime);
+  if (!technicianIds.length || windowStart === null || windowEnd === null || windowEnd <= windowStart) {
+    return [];
+  }
+
+  let conflictQuery = db
+    .from("job_technicians")
+    .select("technician_id, jobs!inner(job_number, scheduled_date, scheduled_time, scheduled_end_date, scheduled_end_time, status), technicians!inner(users(first_name, last_name))")
+    .lte("jobs.scheduled_date", date)
+    .gte("jobs.scheduled_end_date", date)
+    .neq("jobs.status", "cancelled")
+    .eq("is_active", true)
+    .in("technician_id", technicianIds);
+  if (excludeOrder) conflictQuery = conflictQuery.neq("jobs.job_number", excludeOrder);
+  const { data, error } = await conflictQuery;
+  if (error) throw error;
+
+  const conflicts: TechnicianConflict[] = [];
+  for (const assignment of data ?? []) {
+    const job = Array.isArray(assignment.jobs) ? assignment.jobs[0] : assignment.jobs;
+    const booking = bookingFor(job, date);
+    if (!booking || !windowsOverlap(windowStart, windowEnd, booking.startMinutes, booking.endMinutes)) continue;
+    const technician = Array.isArray(assignment.technicians) ? assignment.technicians[0] : assignment.technicians;
+    const technicianUser = technician && (Array.isArray(technician.users) ? technician.users[0] : technician.users);
+    conflicts.push({
+      technicianId: assignment.technician_id,
+      name: technicianUser ? [technicianUser.first_name, technicianUser.last_name].filter(Boolean).join(" ") : "A technician",
+      jobNumber: booking.jobNumber,
+      start: booking.start,
+      end: booking.end,
+    });
+  }
+  return conflicts;
+}
+
+const conflictMessageFor = (conflicts: TechnicianConflict[]) => {
+  if (!conflicts.length) return "";
+  const first = conflicts[0];
+  const extra = conflicts.length > 1 ? ` (+${conflicts.length - 1} more)` : "";
+  return `${first.name} is already booked ${first.start}–${first.end}${first.jobNumber ? ` (${first.jobNumber})` : ""}${extra}.`;
+};
 
 export async function hasOnlyActiveTechnicianRole(technicianIds: string[]) {
   if (!technicianIds.length) return true;
@@ -338,7 +481,14 @@ export async function getCurrentTechnicianId(
   return createdTechnician.technician_id;
 }
 export async function handleListTechnicians({ body }: { body: any }) {
-  return response({ technicians: await listTechnicians(String(body.date ?? ""), String(body.excludeOrder ?? "")) });
+  return response({
+    technicians: await listTechnicians(
+      String(body.date ?? ""),
+      String(body.excludeOrder ?? ""),
+      String(body.startTime ?? ""),
+      String(body.endTime ?? ""),
+    ),
+  });
 }
 
 export async function handleListSchedules({ session }: { session: any }) {
@@ -406,11 +556,16 @@ export async function handleUpdateSchedule({ body, session, db }: { body: any; s
   if (!order || !date || !startTime || !endTime || !["makati", "cebu"].includes(branch) || new Date(`${date}T${endTime}`) <= new Date(`${date}T${startTime}`)) return response({ error: "Please provide a valid date, branch, and time range." }, 400);
   if (!(await hasOnlyActiveTechnicianRole(technicianIds))) return response({ error: "Only active users with the Technician role can be assigned." }, 400);
   if (technicianIds.length) {
-    const { data: booked, error: bookedError } = await db.from("job_technicians").select("technician_id, jobs!inner(job_number, scheduled_date, status)").eq("jobs.scheduled_date", date).neq("jobs.status", "cancelled").eq("is_active", true).neq("jobs.job_number", order).in("technician_id", technicianIds);
-    if (bookedError) throw bookedError;
-    if ((booked ?? []).length) return response({ error: "One or more selected technicians already have a job on that date." }, 409);
+    const conflicts = await findTechnicianConflicts(db, {
+      technicianIds,
+      date,
+      startTime,
+      endTime,
+      excludeOrder: order,
+    });
+    if (conflicts.length) return response({ error: conflictMessageFor(conflicts) }, 409);
   }
-  const { data: job, error: lookupError } = await db.from("jobs").select("job_id, job_number, branch, quotation_id, assignment_confirmed_at").eq("job_number", order).single();
+  const { data: job, error: lookupError } = await db.from("jobs").select("job_id, job_number, branch, quotation_id, assignment_confirmed_at, scheduled_date, scheduled_time, scheduled_end_date, scheduled_end_time").eq("job_number", order).single();
   if (lookupError) throw lookupError;
   // A non-admin works only inside their own branch, including on records
   // created before the branch rule existed.
@@ -430,27 +585,55 @@ export async function handleUpdateSchedule({ body, session, db }: { body: any; s
     const { error: quoteError } = await db.from("quotations").update({ branch, job_type: jobTypeFor(serviceType), site_address: siteAddress }).eq("quotation_id", job.quotation_id);
     if (quoteError) throw quoteError;
   }
-  const { error: updateError } = await db.from("jobs").update({ job_type: jobTypeFor(serviceType), scheduled_date: date, scheduled_time: startTime, scheduled_end_date: date, scheduled_end_time: endTime, branch, site_address: siteAddress, updated_at: new Date().toISOString() }).eq("job_id", job.job_id);
-  if (updateError) throw updateError;
+  let updateError: any = null;
+  try {
+    const { error } = await db.from("jobs").update({ job_type: jobTypeFor(serviceType), scheduled_date: date, scheduled_time: startTime, scheduled_end_date: date, scheduled_end_time: endTime, branch, site_address: siteAddress, updated_at: new Date().toISOString() }).eq("job_id", job.job_id);
+    updateError = error;
+  } catch (error) {
+    updateError = error;
+  }
+  if (updateError) {
+    if (isExclusionViolation(updateError)) {
+      return response({ error: "Another planner booked that time first. Refresh and choose a different window." }, 409);
+    }
+    throw updateError;
+  }
   if (Array.isArray(body.technicianIds)) {
-    const { data: existingAssignments, error: assignmentsError } = await db.from("job_technicians").select("technician_id, is_active").eq("job_id", job.job_id);
-    if (assignmentsError) throw assignmentsError;
-    const existingById = new Map<string, boolean>((existingAssignments ?? []).map((assignment: { technician_id: string; is_active: boolean }) => [assignment.technician_id, assignment.is_active] as const));
-    const selectedIds = new Set(technicianIds);
-    const toInsert = technicianIds.filter((technicianId) => !existingById.has(technicianId));
-    const toActivate = technicianIds.filter((technicianId) => existingById.has(technicianId) && !existingById.get(technicianId));
-    const toDeactivate = [...existingById.entries()].filter(([technicianId, isActive]) => isActive && !selectedIds.has(technicianId)).map(([technicianId]) => technicianId);
-    if (toInsert.length) {
-      const { error } = await db.from("job_technicians").insert(toInsert.map((technicianId) => ({ job_id: job.job_id, technician_id: technicianId, is_active: true })));
-      if (error) throw error;
-    }
-    if (toActivate.length) {
-      const { error } = await db.from("job_technicians").update({ is_active: true }).eq("job_id", job.job_id).in("technician_id", toActivate);
-      if (error) throw error;
-    }
-    if (toDeactivate.length) {
-      const { error } = await db.from("job_technicians").update({ is_active: false }).eq("job_id", job.job_id).in("technician_id", toDeactivate);
-      if (error) throw error;
+    try {
+      const { data: existingAssignments, error: assignmentsError } = await db.from("job_technicians").select("technician_id, is_active").eq("job_id", job.job_id);
+      if (assignmentsError) throw assignmentsError;
+      const existingById = new Map<string, boolean>((existingAssignments ?? []).map((assignment: { technician_id: string; is_active: boolean }) => [assignment.technician_id, assignment.is_active] as const));
+      const selectedIds = new Set(technicianIds);
+      const toInsert = technicianIds.filter((technicianId) => !existingById.has(technicianId));
+      const toActivate = technicianIds.filter((technicianId) => existingById.has(technicianId) && !existingById.get(technicianId));
+      const toDeactivate = [...existingById.entries()].filter(([technicianId, isActive]) => isActive && !selectedIds.has(technicianId)).map(([technicianId]) => technicianId);
+      if (toInsert.length) {
+        const { error } = await db.from("job_technicians").insert(toInsert.map((technicianId) => ({ job_id: job.job_id, technician_id: technicianId, is_active: true })));
+        if (error) throw error;
+      }
+      if (toActivate.length) {
+        const { error } = await db.from("job_technicians").update({ is_active: true }).eq("job_id", job.job_id).in("technician_id", toActivate);
+        if (error) throw error;
+      }
+      if (toDeactivate.length) {
+        const { error } = await db.from("job_technicians").update({ is_active: false }).eq("job_id", job.job_id).in("technician_id", toDeactivate);
+        if (error) throw error;
+      }
+    } catch (error) {
+      // A new assignment lost a race against another planner: put the job's
+      // original window back so its existing assignments stay valid.
+      if (!isExclusionViolation(error)) throw error;
+      const { error: restoreError } = await db
+        .from("jobs")
+        .update({
+          scheduled_date: job.scheduled_date,
+          scheduled_time: job.scheduled_time,
+          scheduled_end_date: job.scheduled_end_date,
+          scheduled_end_time: job.scheduled_end_time,
+        })
+        .eq("job_id", job.job_id);
+      if (restoreError) console.error("Could not restore the previous schedule:", restoreError.message);
+      return response({ error: "Another planner booked that time first. Refresh and choose a different window." }, 409);
     }
   }
   return response({ message: "Schedule updated." });
@@ -480,6 +663,22 @@ export async function handleCreateJobFromTemplate({ body, session, db }: { body:
   const technicianIds = Array.isArray(body.technicianIds)
     ? [...new Set<string>(body.technicianIds.map(String).filter(Boolean))]
     : [];
+
+  // Friendly pre-check; the RPC's transaction and the exclusion constraint are
+  // still the authority if another planner books the slot at the same moment.
+  const jobDate = String(body.date ?? "");
+  const jobStartTime = String(body.startTime ?? "");
+  const jobEndTime = String(body.endTime ?? "");
+  if (technicianIds.length && jobDate && jobStartTime && jobEndTime) {
+    const conflicts = await findTechnicianConflicts(db, {
+      technicianIds,
+      date: jobDate,
+      startTime: jobStartTime,
+      endTime: jobEndTime,
+      excludeOrder: "",
+    });
+    if (conflicts.length) return response({ error: conflictMessageFor(conflicts) }, 409);
+  }
 
   // The representative is always the signed-in account, never a value the
   // browser supplies. The token carries no name, so read it from the user row.
@@ -515,7 +714,12 @@ export async function handleCreateJobFromTemplate({ body, session, db }: { body:
     p_technician_ids: technicianIds.length ? technicianIds : null,
     p_actor: session.sub,
   });
-  if (createError) return response({ error: createError.message }, 400);
+  if (createError) {
+    if (isExclusionViolation(createError)) {
+      return response({ error: "Another planner booked that time first. Refresh and choose a different window." }, 409);
+    }
+    return response({ error: createError.message }, 400);
+  }
   return response({ job: created }, 201);
 }
 
@@ -537,9 +741,8 @@ export async function handleCreateSchedule({ body, session, db }: { body: any; s
   if (!(await hasOnlyActiveTechnicianRole(technicianIds))) return response({ error: "Only active users with the Technician role can be assigned." }, 400);
 
   if (technicianIds.length) {
-    const { data: booked, error: bookedError } = await db.from("job_technicians").select("technician_id, jobs!inner(scheduled_date, status)").eq("jobs.scheduled_date", date).neq("jobs.status", "cancelled").eq("is_active", true).in("technician_id", technicianIds);
-    if (bookedError) throw bookedError;
-    if ((booked ?? []).length) return response({ error: "One or more selected technicians already have a job on that date." }, 409);
+    const conflicts = await findTechnicianConflicts(db, { technicianIds, date, startTime, endTime });
+    if (conflicts.length) return response({ error: conflictMessageFor(conflicts) }, 409);
   }
 
   const { data: client, error: clientError } = await db.from("clients").insert({ first_name: firstName, last_name: lastName, company_name: clientType === "company" ? companyName : null, name: clientType === "company" ? companyName : `${firstName} ${lastName}`, client_type: clientType, contact_channel: "website", branch_served: branch, phone: phoneNumber, email: contactEmail, address }).select("client_id").single();
@@ -548,7 +751,16 @@ export async function handleCreateSchedule({ body, session, db }: { body: any; s
   if (jobError) throw jobError;
   if (technicianIds.length) {
     const { error: assignmentError } = await db.from("job_technicians").insert(technicianIds.map((technicianId) => ({ job_id: job.job_id, technician_id: technicianId, is_active: true })));
-    if (assignmentError) throw assignmentError;
+    if (assignmentError) {
+      // The job and client were created moments ago by this request; remove
+      // them so a lost race cannot leave an unassigned job behind.
+      await db.from("jobs").delete().eq("job_id", job.job_id);
+      await db.from("clients").delete().eq("client_id", client.client_id);
+      if (isExclusionViolation(assignmentError)) {
+        return response({ error: "Another planner booked that time first. Refresh and choose a different window." }, 409);
+      }
+      throw assignmentError;
+    }
   }
   return response({ job: { id: job.job_id, order: job.job_number } }, 201);
 }

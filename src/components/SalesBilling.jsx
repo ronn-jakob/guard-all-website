@@ -71,6 +71,15 @@ function SalesBilling() {
   const periodValue =
     periodMode === "month" ? periodMonth : periodMode === "year" ? periodYear : "";
 
+  // The printable report always needs a concrete period; "All time" opens the
+  // current month so the link is never ambiguous.
+  const reportPeriod =
+    periodMode === "year"
+      ? { mode: "year", value: periodYear }
+      : periodMode === "month"
+        ? { mode: "month", value: periodMonth }
+        : { mode: "month", value: todayKey().slice(0, 7) };
+
   const periodInvoices = useMemo(
     () => filterInvoicesByPeriod(invoices, { mode: periodMode, value: periodValue }),
     [invoices, periodMode, periodValue],
@@ -180,6 +189,7 @@ function SalesBilling() {
             onChangeMonth={setPeriodMonth}
             onChangeYear={setPeriodYear}
             onToggleBreakdown={() => setIsBreakdownOpen((open) => !open)}
+            printHref={`/print/billing?mode=${reportPeriod.mode}&value=${reportPeriod.value}`}
           />
 
           <BillingMetricCards

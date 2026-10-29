@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from "react";
-import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
 import { getSession } from "../lib/auth.js";
+import { currentPeriodValue } from "../lib/reportPeriods.js";
 import {
   adjustInventoryStock,
   allocateJobStock,
@@ -666,7 +667,18 @@ function Inventory() {
                   : "Know what can leave the branch before the truck does."}
               </p>
             </div>
-            <div className="flex items-center gap-3 max-[620px]:w-full max-[620px]:gap-2">
+            <div className="flex items-center gap-3 max-[620px]:w-full max-[620px]:gap-2 max-[620px]:flex-wrap">
+              {!isAllocatingForJob && !isAllocationRoute && !isJobAllocation && (
+                <Link
+                  to={`/print/inventory?mode=month&value=${currentPeriodValue("month")}`}
+                  className="flex items-center gap-1 rounded-[6px] border border-[#d9dfe4] bg-white px-4 py-3 text-[12px] font-bold text-[#5e6b78] no-underline hover:bg-[#f4f6f8] max-[1024px]:px-3 max-[1024px]:py-2 max-[620px]:px-2 max-[620px]:text-[11px]"
+                >
+                  <span className="material-symbols-outlined text-[16px]">
+                    print
+                  </span>
+                  Print report
+                </Link>
+              )}
               {!isAllocatingForJob && !isAllocationRoute && !isJobAllocation && <button
                 type="button"
                 onClick={openAddItem}
