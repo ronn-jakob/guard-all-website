@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import Sidebar from "./Sidebar.jsx";
 import TopBar from "./TopBar.jsx";
-import { listInvoices } from "../lib/api/billing.js";
+import { listInvoices, listInvoiceCandidates } from "../lib/api/billing.js";
 import {
   buildBillingBreakdown,
   filterInvoicesByPeriod,
@@ -31,6 +31,11 @@ function SalesBilling() {
   const [periodMonth, setPeriodMonth] = useState(() => todayKey().slice(0, 7));
   const [periodYear, setPeriodYear] = useState(() => todayKey().slice(0, 4));
   const [isBreakdownOpen, setIsBreakdownOpen] = useState(true);
+  // Approved reports on jobs with no invoice yet. A live queue, not a period
+  // total, so it stays put when the money cards change with the filter.
+  const [waitingReports, setWaitingReports] = useState(0);
+  const [isLoadingWaiting, setIsLoadingWaiting] = useState(true);
+  const [waitingError, setWaitingError] = useState("");
 
   useEffect(() => {
     let isCurrent = true;
@@ -45,6 +50,18 @@ function SalesBilling() {
       })
       .finally(() => {
         if (isCurrent) setIsLoading(false);
+      });
+    listInvoiceCandidates()
+      .then(({ candidates }) => {
+        if (!isCurrent) return;
+        setWaitingReports(Array.isArray(candidates) ? candidates.length : 0);
+        setWaitingError("");
+      })
+      .catch((error) => {
+        if (isCurrent) setWaitingError(error.message);
+      })
+      .finally(() => {
+        if (isCurrent) setIsLoadingWaiting(false);
       });
     return () => {
       isCurrent = false;
@@ -165,7 +182,12 @@ function SalesBilling() {
             onToggleBreakdown={() => setIsBreakdownOpen((open) => !open)}
           />
 
-          <BillingMetricCards summary={summary} />
+          <BillingMetricCards
+            summary={summary}
+            waitingReports={waitingReports}
+            isLoadingWaiting={isLoadingWaiting}
+            waitingError={waitingError}
+          />
 
           {isBreakdownOpen && (
             <BillingBreakdown

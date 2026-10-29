@@ -27,6 +27,7 @@ export default function ReportDetailDialog({ openReport, setOpenReport, openRepo
           </h2>
           <p className="m-0 mt-1 text-[12px] text-[#7d8994]">
             {openReport.service} · {openReport.technician}
+            {openReport.filedBy ? ` · filed by ${openReport.filedBy}` : ""}
           </p>
         </div>
         <button

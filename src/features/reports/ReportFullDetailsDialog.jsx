@@ -31,6 +31,7 @@ export default function ReportFullDetailsDialog({ report, onClose }) {
             </h2>
             <p className="m-0 mt-1 text-[12px] text-[#7d8994]">
               {report.service} · {report.technician}
+              {report.filedBy ? ` · filed by ${report.filedBy}` : ""}
             </p>
           </div>
           <button

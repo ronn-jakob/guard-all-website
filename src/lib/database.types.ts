@@ -109,6 +109,7 @@ export type Database = {
           client_signoff: boolean
           client_signoff_name: string | null
           created_at: string
+          filed_by_user_id: string | null
           issue_description: string | null
           job_id: string
           recommendations: string | null
@@ -129,6 +130,7 @@ export type Database = {
           client_signoff?: boolean
           client_signoff_name?: string | null
           created_at?: string
+          filed_by_user_id?: string | null
           issue_description?: string | null
           job_id: string
           recommendations?: string | null
@@ -149,6 +151,7 @@ export type Database = {
           client_signoff?: boolean
           client_signoff_name?: string | null
           created_at?: string
+          filed_by_user_id?: string | null
           issue_description?: string | null
           job_id?: string
           recommendations?: string | null
@@ -165,6 +168,13 @@ export type Database = {
           work_performed?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "field_reports_filed_by_user_id_fkey"
+            columns: ["filed_by_user_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["user_id"]
+          },
           {
             foreignKeyName: "field_reports_job_id_fkey"
             columns: ["job_id"]

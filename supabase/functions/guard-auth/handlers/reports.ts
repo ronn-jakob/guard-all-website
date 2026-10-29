@@ -57,10 +57,12 @@ export async function listFieldReports(session: Record<string, unknown>, request
       additional_notes,
       issue_description,
       recommendations,
+      filed_by_user_id,
       report_parts_used(quantity, parts(sku, name)),
       report_attachments(file_type, file_url),
       jobs!inner(job_id, job_number, job_type, branch, clients(name, address), job_technicians(technician_id, is_active)),
-      technicians!inner(technician_id, user_id, users(first_name, last_name))
+      technicians!inner(technician_id, user_id, users(first_name, last_name)),
+      filed_by:users!field_reports_filed_by_user_id_fkey(first_name, last_name)
     `)
     .in("review_status", ["submitted", "approved", "returned"]);
   // Managers review their own branch; a technician's own report list stays
@@ -230,6 +232,12 @@ export async function listFieldReports(session: Record<string, unknown>, request
       (assignment: any) => assignment.is_active,
     ).length;
     const submittedAt = report.submitted_at ? new Date(report.submitted_at) : new Date();
+    // Only set when an Admin filed for the technician; the technician's own
+    // submissions leave it NULL and need no extra line on the report.
+    const filer = Array.isArray(report.filed_by) ? report.filed_by[0] : report.filed_by;
+    const filedBy = filer
+      ? [filer.first_name, filer.last_name].filter(Boolean).join(" ")
+      : "";
     // Job-level invoice state: an invoiced job is done with the review queue,
     // whatever this particular report's review status says.
     const jobInvoice = job?.job_id ? invoiceByJobId.get(job.job_id) ?? null : null;
@@ -264,6 +272,7 @@ export async function listFieldReports(session: Record<string, unknown>, request
       client: client?.name ?? "Unknown client",
       service: serviceLabelFor(job?.job_type),
       technician: user ? [user.first_name, user.last_name].filter(Boolean).join(" ") : "Unknown technician",
+      filedBy,
       time: submittedAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }),
       serviceDate: report.service_date ? String(report.service_date) : "",
       arrivalTime: String(report.time_arrival ?? "").slice(0, 5),
@@ -366,7 +375,46 @@ export async function submitFieldReport(session: Record<string, unknown>, body: 
     throw new Error("One or more images were not uploaded correctly. Remove them and try again.");
   }
 
-  const technicianId = await getCurrentTechnicianId(session, db);
+  // Technicians, and managers who are on the crew, file their own report. An
+  // Admin who is not assigned files it on behalf of one of the job's active
+  // technicians, which the composite FK and the RPC re-check.
+  const isAdmin = String(session.role ?? "") === "Admin";
+  const ownTechnicianId = await findCurrentTechnicianId(session);
+  const isActiveAssignee = async (technicianId: string) => {
+    if (!technicianId) return false;
+    const { data, error } = await db
+      .from("job_technicians")
+      .select("technician_id")
+      .eq("job_id", jobId)
+      .eq("technician_id", technicianId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (error) throw error;
+    return Boolean(data);
+  };
+
+  let technicianId: string;
+  let filedOnBehalf = false;
+  if (isAdmin) {
+    const requestedTechnicianId = String(body.technicianId ?? "").trim();
+    const chosenTechnicianId = requestedTechnicianId || ownTechnicianId;
+    if (!chosenTechnicianId) {
+      throw new Error("Choose which technician this report belongs to.");
+    }
+    if (!(await isActiveAssignee(chosenTechnicianId))) {
+      throw new Error(
+        requestedTechnicianId
+          ? "That technician is not assigned to this job."
+          : "Choose which technician this report belongs to.",
+      );
+    }
+    technicianId = chosenTechnicianId;
+    // An admin on the crew is simply filing their own report.
+    filedOnBehalf = chosenTechnicianId !== ownTechnicianId;
+  } else {
+    technicianId = await getCurrentTechnicianId(session, db);
+  }
+
   const { data: existingReport, error: existingReportError } = await db
     .from("field_reports")
     .select("report_id")
@@ -402,6 +450,19 @@ export async function submitFieldReport(session: Record<string, unknown>, body: 
   );
 
   if (reportError) throw new Error(reportError.message);
+
+  // The report belongs to the technician; this records who actually filed it
+  // when an Admin acted on their behalf. A failure here must not lose the
+  // report — the audit log still attributes the write to the acting admin.
+  if (filedOnBehalf) {
+    const { error: filerError } = await db
+      .from("field_reports")
+      .update({ filed_by_user_id: session.sub })
+      .eq("report_id", report.reportId);
+    if (filerError) {
+      console.error("Could not record who filed the field report:", filerError.message);
+    }
+  }
   return { report: { id: report.reportId, number: report.reportNumber } };
 }
 
@@ -697,18 +758,24 @@ export async function handleCreateReportUpload({ body, session, db }: { body: an
   }
 
   const technicianId = await findCurrentTechnicianId(session);
-  if (!technicianId) {
+  const isAdmin = String(session.role ?? "") === "Admin";
+  if (!technicianId && !isAdmin) {
     return response({ error: "Only an assigned technician can attach images." }, 403);
   }
-  const { data: assignment, error: assignmentError } = await db
-    .from("job_technicians")
-    .select("job_id")
-    .eq("job_id", jobId)
-    .eq("technician_id", technicianId)
-    .eq("is_active", true)
-    .maybeSingle();
-  if (assignmentError) throw assignmentError;
-  if (!assignment) return response({ error: "You are not assigned to this job." }, 403);
+  // An Admin may stage photos for a report they are filing on behalf of an
+  // assignee. The object still lives under the uploader's own user id, so the
+  // submit-time path check and discard ownership keep working unchanged.
+  if (!isAdmin) {
+    const { data: assignment, error: assignmentError } = await db
+      .from("job_technicians")
+      .select("job_id")
+      .eq("job_id", jobId)
+      .eq("technician_id", technicianId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (assignmentError) throw assignmentError;
+    if (!assignment) return response({ error: "You are not assigned to this job." }, 403);
+  }
 
   const path = `reports/${jobId}/${session.sub}/${crypto.randomUUID()}.${attachmentExtension(contentType)}`;
   const { data: signed, error: signError } = await db.storage

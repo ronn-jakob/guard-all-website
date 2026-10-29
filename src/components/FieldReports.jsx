@@ -89,11 +89,15 @@ function FieldReports() {
   });
 
   const viewerRole = getSession()?.user?.role;
+  // An Admin may file a report on a technician's behalf: the report still
+  // belongs to that assignee, and the backend records who actually filed it.
+  const isAdminViewer = viewerRole === "Admin";
   const canFilterByTechnician = [
     "Admin",
     "Service Manager",
     "Sales Manager",
   ].includes(viewerRole);
+  const [reportTechnicianId, setReportTechnicianId] = useState("");
   const [technicianFilter, setTechnicianFilter] = useState("");
   const [technicianOptions, setTechnicianOptions] = useState([]);
   const [submittedReports, setSubmittedReports] = useState([]);
@@ -168,9 +172,17 @@ function FieldReports() {
 
   function selectJob(job) {
     // Read the name inside the handler so this function owns no component state;
-    // otherwise the auto-select effect would need it as a dependency.
+    // otherwise the auto-select effect would need it as a dependency. The same
+    // applies to the role check that decides who a report belongs to.
     const currentName = getSession()?.user?.name || "";
+    const viewerIsAdmin = getSession()?.user?.role === "Admin";
+    // An Admin defaults to the first assignee who still owes a report.
+    const assigned = job.assignedTechnicians ?? [];
+    const defaultAssignee = viewerIsAdmin
+      ? assigned.find((technician) => !technician.reported) ?? assigned[0] ?? null
+      : null;
     setSelectedJob(job);
+    setReportTechnicianId(defaultAssignee?.technicianId ?? "");
     setSubmitError("");
     setAttachedImages([]);
     setUsedParts(
@@ -187,8 +199,9 @@ function FieldReports() {
       jobNumber: job.jobNumber,
       serviceType: job.serviceType,
       siteAddress: job.siteAddress,
-      technicianName:
-        currentName || job.assignedTechnicians?.[0]?.name || job.technicianName,
+      technicianName: viewerIsAdmin
+        ? defaultAssignee?.name ?? job.technicianName
+        : currentName || job.assignedTechnicians?.[0]?.name || job.technicianName,
       serviceDate: job.serviceDate,
       arrivalTime: job.arrivalTime,
     }));
@@ -333,6 +346,10 @@ function FieldReports() {
 
   async function handleSubmitReport() {
     if (!selectedJob) return;
+    if (isAdminViewer && !reportTechnicianId) {
+      setSubmitError("Choose which technician this report belongs to.");
+      return;
+    }
     const partsUsed = (selectedJob.reservedParts || [])
       .filter((part) => usedParts[part.jobPartId]?.selected)
       .map((part) => ({
@@ -386,6 +403,7 @@ function FieldReports() {
         serviceType: formValues.serviceType,
         siteAddress: formValues.siteAddress,
         technicianName: formValues.technicianName,
+        ...(isAdminViewer ? { technicianId: reportTechnicianId } : {}),
         serviceDate: formValues.serviceDate,
         arrivalTime: formValues.arrivalTime,
         workPerformed: formValues.workPerformed,
@@ -657,19 +675,64 @@ function FieldReports() {
                     02 / TECHNICIAN &amp; TIME ON SITE
                   </p>
                   <div className="mt-3 grid grid-cols-2 gap-2 max-[620px]:grid-cols-1">
-                    <label
-                      className={`${label} col-span-2 max-[620px]:col-span-1`}
-                    >
-                      Technician name *
-                      <input
-                        className={input}
-                        placeholder="Full name of technician"
-                        value={formValues.technicianName || ""}
-                        onChange={(event) =>
-                          updateField("technicianName", event.target.value)
-                        }
-                      />
-                    </label>
+                    {isAdminViewer ? (
+                      <label
+                        className={`${label} col-span-2 max-[620px]:col-span-1`}
+                      >
+                        Report belongs to *
+                        <select
+                          className={input}
+                          value={reportTechnicianId}
+                          onChange={(event) => {
+                            const technicianId = event.target.value;
+                            const assigned =
+                              selectedJob?.assignedTechnicians ?? [];
+                            setReportTechnicianId(technicianId);
+                            updateField(
+                              "technicianName",
+                              assigned.find(
+                                (technician) =>
+                                  technician.technicianId === technicianId,
+                              )?.name ?? "",
+                            );
+                          }}
+                        >
+                          {!reportTechnicianId && (
+                            <option value="">Select a technician…</option>
+                          )}
+                          {(selectedJob?.assignedTechnicians ?? []).map(
+                            (technician) => (
+                              <option
+                                key={technician.technicianId}
+                                value={technician.technicianId}
+                                disabled={technician.reported}
+                              >
+                                {technician.name}
+                                {technician.reported ? " (report filed)" : ""}
+                              </option>
+                            ),
+                          )}
+                        </select>
+                        <small className="mt-1 block text-[10px] font-normal text-[#82909c]">
+                          The report belongs to this technician; your name is
+                          recorded as the filer.
+                        </small>
+                      </label>
+                    ) : (
+                      <label
+                        className={`${label} col-span-2 max-[620px]:col-span-1`}
+                      >
+                        Technician name *
+                        <input
+                          className={input}
+                          placeholder="Full name of technician"
+                          value={formValues.technicianName || ""}
+                          onChange={(event) =>
+                            updateField("technicianName", event.target.value)
+                          }
+                        />
+                      </label>
+                    )}
                     <label className={label}>
                       Date of service *
                       <input
